@@ -1,6 +1,6 @@
 import os
 import subprocess
-from .base import cyberclaw_tool
+from .base import auditronclaw_tool
 from ..config import OFFICE_DIR
 import re
 import platform
@@ -23,7 +23,7 @@ def _get_safe_path(relative_path: str) -> str:
     
     return target_path
 
-@cyberclaw_tool
+@auditronclaw_tool
 def list_office_files(sub_dir: str = "") -> str:
     """
     查看你的 office 工位里有哪些文件和文件夹。
@@ -49,7 +49,7 @@ def list_office_files(sub_dir: str = "") -> str:
     except Exception as e:
         return str(e)
     
-@cyberclaw_tool
+@auditronclaw_tool
 def read_office_file(filepath: str) -> str:
     """
     读取 office 工位里指定文件的内容。
@@ -69,7 +69,7 @@ def read_office_file(filepath: str) -> str:
     except Exception as e:
         return str(e)
     
-@cyberclaw_tool
+@auditronclaw_tool
 def write_office_file(filepath: str, content: str, mode: str = "w") -> str:
     """
     在 office 工位里操作文件内容。
@@ -109,7 +109,7 @@ def write_office_file(filepath: str, content: str, mode: str = "w") -> str:
         return str(e)
     
 
-@cyberclaw_tool
+@auditronclaw_tool
 def execute_office_shell(command: str) -> str:
     """
     在 office 工位中执行 Shell 命令。

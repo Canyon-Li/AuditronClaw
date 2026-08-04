@@ -6,7 +6,7 @@ from langchain_core.messages import HumanMessage
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cyberclaw.core.agent import create_agent_app
+from auditronclaw.core.agent import create_agent_app
 
 def main():
     load_dotenv()

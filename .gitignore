@@ -27,3 +27,9 @@ workspace/memory/*.md
 workspace/office
 
 *.egg-info/
+
+.codojo/
+.claude/
+docs/local
+.vscode/
+.vscode/settings.json

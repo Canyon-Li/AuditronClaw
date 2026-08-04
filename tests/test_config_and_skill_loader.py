@@ -10,7 +10,7 @@ class TestConfig(unittest.TestCase):
 
     def test_config_import(self):
         """测试配置模块导入"""
-        from cyberclaw.core.config import WORKSPACE_DIR, MEMORY_DIR, PERSONAS_DIR, SCRIPTS_DIR, OFFICE_DIR, SKILLS_DIR, DB_PATH, TASKS_FILE
+        from auditronclaw.core.config import WORKSPACE_DIR, MEMORY_DIR, PERSONAS_DIR, SCRIPTS_DIR, OFFICE_DIR, SKILLS_DIR, DB_PATH, TASKS_FILE
 
         # 验证配置项存在
         self.assertIsInstance(WORKSPACE_DIR, str)
@@ -28,7 +28,7 @@ class TestSkillLoader(unittest.TestCase):
     def test_skill_loader_import(self):
         """测试技能加载器模块导入"""
         try:
-            from cyberclaw.core.skill_loader import load_dynamic_skills
+            from auditronclaw.core.skill_loader import load_dynamic_skills
             # 确保函数存在
             self.assertTrue(callable(load_dynamic_skills))
         except ImportError as e:
@@ -39,7 +39,7 @@ class TestSkillLoader(unittest.TestCase):
     @patch('os.listdir', side_effect=FileNotFoundError())
     def test_load_dynamic_skills_no_directory(self, mock_listdir, mock_exists):
         """测试技能加载器 - 不存在的目录"""
-        from cyberclaw.core.skill_loader import load_dynamic_skills
+        from auditronclaw.core.skill_loader import load_dynamic_skills
 
         skills = load_dynamic_skills()
         self.assertEqual(skills, [])
@@ -48,7 +48,7 @@ class TestSkillLoader(unittest.TestCase):
     @patch('os.listdir', return_value=[])
     def test_load_dynamic_skills_empty_directory(self, mock_listdir, mock_exists):
         """测试技能加载器 - 空目录"""
-        from cyberclaw.core.skill_loader import load_dynamic_skills
+        from auditronclaw.core.skill_loader import load_dynamic_skills
 
         skills = load_dynamic_skills()
         self.assertEqual(skills, [])

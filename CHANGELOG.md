@@ -4,7 +4,7 @@
 
 ### 新增
 
-- ✨ **懒加载技能加载器** (cyberclaw/core/skill_loader.py)
+- ✨ **懒加载技能加载器** (auditronclaw/core/skill_loader.py)
   - 实现渐进式加载机制，启动时只扫描元数据
   - 首次调用技能时才加载完整内容
   - LRU 缓存策略（最大 50 个技能）
@@ -70,7 +70,7 @@
 ### 基本使用（与之前相同）
 
 ```python
-from cyberclaw.core.skill_loader import load_dynamic_skills
+from auditronclaw.core.skill_loader import load_dynamic_skills
 
 # 自动使用懒加载
 tools = load_dynamic_skills()
@@ -79,7 +79,7 @@ tools = load_dynamic_skills()
 ### 高级使用
 
 ```python
-from cyberclaw.core.skill_loader import (
+from auditronclaw.core.skill_loader import (
     load_dynamic_skills,
     reload_skills,
     get_skill_count,

@@ -160,7 +160,7 @@ pip install -e .
 > pip install -e .
 > ```
 > 
-> 安装完成后，即可在任意目录使用 `cyberclaw` 命令。
+> 安装完成后，即可在任意目录使用 `auditronclaw` 命令。
 
 ### 2️⃣ 配置
 
@@ -170,7 +170,7 @@ pip install -e .
 
 ```bash
 # 启动交互式配置向导
-cyberclaw config
+auditronclaw config
 ```
 
 配置向导会引导你：
@@ -213,15 +213,15 @@ OPENAI_API_BASE=https://coding.dashscope.aliyuncs.com/v1
 - `OPENAI_API_BASE`: 兼容接口的 Base URL（阿里云、腾讯云等）
 - `OLLAMA_BASE_URL`: Ollama 本地服务地址（默认 `http://localhost:11434`）
 
-> 💡 **工作区配置**：工作区路径已在代码中初始化，默认为项目根目录的 `workspace` 文件夹，无需在 `.env` 中配置。仅当需要自定义工作区位置时，才设置 `CYBERCLAW_WORKSPACE` 环境变量。
+> 💡 **工作区配置**：工作区路径已在代码中初始化，默认为项目根目录的 `workspace` 文件夹，无需在 `.env` 中配置。仅当需要自定义工作区位置时，才设置 `AUDITRONCLAW_WORKSPACE` 环境变量。
 
-> 💡 提示：配置完成后，可运行 `cyberclaw run` 聊天测试连接是否正常。
+> 💡 提示：配置完成后，可运行 `auditronclaw run` 聊天测试连接是否正常。
 
 ### 3️⃣ 运行
 
 ```bash
 # 启动主程序
-cyberclaw run
+auditronclaw run
 ```
 
 ![欢迎界面](docs/welcome.png)
@@ -255,7 +255,7 @@ AuditronClaw 内置心跳任务系统（Heartbeat），自动在后台执行定�
 - **自动触发**：心跳进程每秒检查任务队列，到点自动触发
 - **循环任务**：支持 daily/weekly/monthly 循环模式
 - **任务持久化**：任务保存在 `workspace/tasks.json`，重启不丢失
-- **实时监控**：运行 `cyberclaw monitor` 可查看任务执行日志
+- **实时监控**：运行 `auditronclaw monitor` 可查看任务执行日志
 
 **心跳任务示例：**
 ```bash
@@ -272,7 +272,7 @@ AuditronClaw 内置心跳任务系统（Heartbeat），自动在后台执行定�
 
 在另一个终端运行：
 ```bash
-cyberclaw monitor
+auditronclaw monitor
 ```
 
 ![监控终端](docs/monitor.png)
@@ -338,19 +338,19 @@ cyberclaw monitor
 
 | 模块 | 文件 | 功能 |
 |------|------|------|
-| **Agent 循环** | `cyberclaw/core/agent.py` | LangGraph StateGraph，决策大脑 |
-| **技能加载** | `cyberclaw/core/skill_loader.py` | 动态加载 SKILL.md，两段式调用 |
-| **上下文管理** | `cyberclaw/core/context.py` | 消息修剪，双水位记忆 |
-| **内置工具** | `cyberclaw/core/tools/builtins.py` | 时间/计算/任务调度等 |
-| **沙盒工具** | `cyberclaw/core/tools/sandbox_tools.py` | 文件操作 + Shell 执行 |
-| **审计日志** | `cyberclaw/core/logger.py` | JSONL 格式事件记录 |
-| **心跳任务** | `cyberclaw/core/heartbeat.py` | 定时任务检查与触发 |
+| **Agent 循环** | `auditronclaw/core/agent.py` | LangGraph StateGraph，决策大脑 |
+| **技能加载** | `auditronclaw/core/skill_loader.py` | 动态加载 SKILL.md，两段式调用 |
+| **上下文管理** | `auditronclaw/core/context.py` | 消息修剪，双水位记忆 |
+| **内置工具** | `auditronclaw/core/tools/builtins.py` | 时间/计算/任务调度等 |
+| **沙盒工具** | `auditronclaw/core/tools/sandbox_tools.py` | 文件操作 + Shell 执行 |
+| **审计日志** | `auditronclaw/core/logger.py` | JSONL 格式事件记录 |
+| **心跳任务** | `auditronclaw/core/heartbeat.py` | 定时任务检查与触发 |
 
 ### 项目结构
 
 ```
 AuditronClaw/
-├── cyberclaw/                    # 核心包
+├── auditronclaw/                    # 核心包
 │   ├── core/
 │   │   ├── agent.py              # Agent 循环
 │   │   ├── config.py             # 配置管理
@@ -496,7 +496,7 @@ curl "wttr.in/Beijing?format=3"
 
 在另一个终端运行：
 ```bash
-cyberclaw monitor
+auditronclaw monitor
 ```
 
 实时查看：
@@ -810,7 +810,7 @@ pip install -e .
 > pip install -e .
 > ```
 >
-> After installation, the `cyberclaw` command is available from any directory.
+> After installation, the `auditronclaw` command is available from any directory.
 
 ### 2️⃣ Configuration
 
@@ -820,7 +820,7 @@ There are two configuration methods: the **automatic setup wizard** (recommended
 
 ```bash
 # Start the interactive configuration wizard
-cyberclaw config
+auditronclaw config
 ```
 
 The wizard guides you through:
@@ -863,15 +863,15 @@ OPENAI_API_BASE=https://coding.dashscope.aliyuncs.com/v1
 - `OPENAI_API_BASE`: Base URL for compatible APIs such as Alibaba Cloud or Tencent Cloud
 - `OLLAMA_BASE_URL`: local Ollama service URL, defaulting to `http://localhost:11434`
 
-> 💡 **Workspace configuration**: the workspace path is initialized in code and defaults to the `workspace` folder in the project root. You do not need to configure it in `.env`. Set the `CYBERCLAW_WORKSPACE` environment variable only when you need a custom workspace path.
+> 💡 **Workspace configuration**: the workspace path is initialized in code and defaults to the `workspace` folder in the project root. You do not need to configure it in `.env`. Set the `AUDITRONCLAW_WORKSPACE` environment variable only when you need a custom workspace path.
 
-> 💡 Tip: after configuration, run `cyberclaw run` to test whether chat connectivity works.
+> 💡 Tip: after configuration, run `auditronclaw run` to test whether chat connectivity works.
 
 ### 3️⃣ Run
 
 ```bash
 # Start the main program
-cyberclaw run
+auditronclaw run
 ```
 
 ![Welcome Screen](docs/welcome.png)
@@ -905,7 +905,7 @@ AuditronClaw includes a heartbeat task system that automatically executes schedu
 - **Automatic triggering**: the heartbeat process checks the task queue every second and triggers tasks on time
 - **Recurring tasks**: supports daily, weekly, and monthly recurrence
 - **Persistent tasks**: tasks are stored in `workspace/tasks.json` and survive restarts
-- **Real-time monitoring**: run `cyberclaw monitor` to view task execution logs
+- **Real-time monitoring**: run `auditronclaw monitor` to view task execution logs
 
 **Heartbeat task example:**
 ```bash
@@ -922,7 +922,7 @@ AuditronClaw includes a heartbeat task system that automatically executes schedu
 
 Run this in another terminal:
 ```bash
-cyberclaw monitor
+auditronclaw monitor
 ```
 
 ![Monitoring Terminal](docs/monitor.png)
@@ -988,19 +988,19 @@ cyberclaw monitor
 
 | Module | File | Function |
 |------|------|------|
-| **Agent loop** | `cyberclaw/core/agent.py` | LangGraph StateGraph and decision engine |
-| **Skill loading** | `cyberclaw/core/skill_loader.py` | Dynamically loads SKILL.md with two-phase invocation |
-| **Context management** | `cyberclaw/core/context.py` | Message trimming and dual-watermark memory |
-| **Built-in tools** | `cyberclaw/core/tools/builtins.py` | Time, calculation, task scheduling, and more |
-| **Sandbox tools** | `cyberclaw/core/tools/sandbox_tools.py` | File operations and shell execution |
-| **Audit logging** | `cyberclaw/core/logger.py` | JSONL event logging |
-| **Heartbeat tasks** | `cyberclaw/core/heartbeat.py` | Scheduled task checking and triggering |
+| **Agent loop** | `auditronclaw/core/agent.py` | LangGraph StateGraph and decision engine |
+| **Skill loading** | `auditronclaw/core/skill_loader.py` | Dynamically loads SKILL.md with two-phase invocation |
+| **Context management** | `auditronclaw/core/context.py` | Message trimming and dual-watermark memory |
+| **Built-in tools** | `auditronclaw/core/tools/builtins.py` | Time, calculation, task scheduling, and more |
+| **Sandbox tools** | `auditronclaw/core/tools/sandbox_tools.py` | File operations and shell execution |
+| **Audit logging** | `auditronclaw/core/logger.py` | JSONL event logging |
+| **Heartbeat tasks** | `auditronclaw/core/heartbeat.py` | Scheduled task checking and triggering |
 
 ### Project Structure
 
 ```
 AuditronClaw/
-├── cyberclaw/                    # Core package
+├── auditronclaw/                    # Core package
 │   ├── core/
 │   │   ├── agent.py              # Agent loop
 │   │   ├── config.py             # Configuration management
@@ -1147,7 +1147,7 @@ curl "wttr.in/Beijing?format=3"
 
 Run this in another terminal:
 ```bash
-cyberclaw monitor
+auditronclaw monitor
 ```
 
 View in real time:

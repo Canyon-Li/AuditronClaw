@@ -18,15 +18,15 @@ class TestHeartbeatPacemaker(unittest.TestCase):
         self.original_tasks_file = None
         
         # 保存原始 TASKS_FILE 路径
-        import cyberclaw.core.config
-        self.original_tasks_file = cyberclaw.core.config.TASKS_FILE
+        import auditronclaw.core.config
+        self.original_tasks_file = auditronclaw.core.config.TASKS_FILE
         
         # 设置临时任务文件
-        cyberclaw.core.config.TASKS_FILE = self.temp_file.name
+        auditronclaw.core.config.TASKS_FILE = self.temp_file.name
         
         # 同时 patch heartbeat 模块中的引用
-        import cyberclaw.core.heartbeat
-        cyberclaw.core.heartbeat.TASKS_FILE = self.temp_file.name
+        import auditronclaw.core.heartbeat
+        auditronclaw.core.heartbeat.TASKS_FILE = self.temp_file.name
 
     def tearDown(self):
         """每个测试后清理临时文件"""
@@ -35,15 +35,15 @@ class TestHeartbeatPacemaker(unittest.TestCase):
             os.unlink(self.temp_file.name)
         
         # 恢复原始路径
-        import cyberclaw.core.config
-        cyberclaw.core.config.TASKS_FILE = self.original_tasks_file
+        import auditronclaw.core.config
+        auditronclaw.core.config.TASKS_FILE = self.original_tasks_file
         
-        import cyberclaw.core.heartbeat
-        cyberclaw.core.heartbeat.TASKS_FILE = self.original_tasks_file
+        import auditronclaw.core.heartbeat
+        auditronclaw.core.heartbeat.TASKS_FILE = self.original_tasks_file
 
     def test_no_tasks_file(self):
         """测试任务文件不存在时的行为"""
-        from cyberclaw.core.heartbeat import pacemaker_loop
+        from auditronclaw.core.heartbeat import pacemaker_loop
         
         # 删除临时文件模拟不存在
         os.unlink(self.temp_file.name)
@@ -51,7 +51,7 @@ class TestHeartbeatPacemaker(unittest.TestCase):
         # 运行一个周期（不等待实际间隔）
         async def run_test():
             # 直接测试逻辑，不实际等待
-            import cyberclaw.core.heartbeat as hb
+            import auditronclaw.core.heartbeat as hb
             # 模拟 TASKS_FILE 不存在
             with patch.object(hb, 'TASKS_FILE', '/nonexistent/path.json'):
                 # 不应该抛出异常
@@ -62,7 +62,7 @@ class TestHeartbeatPacemaker(unittest.TestCase):
 
     def test_empty_tasks_file(self):
         """测试任务文件为空时的行为"""
-        from cyberclaw.core.heartbeat import pacemaker_loop
+        from auditronclaw.core.heartbeat import pacemaker_loop
         
         # 写入空内容
         with open(self.temp_file.name, 'w') as f:
@@ -70,7 +70,7 @@ class TestHeartbeatPacemaker(unittest.TestCase):
         
         # 运行测试
         async def run_test():
-            import cyberclaw.core.heartbeat as hb
+            import auditronclaw.core.heartbeat as hb
             # 不应该抛出异常
             pass
         

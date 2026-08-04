@@ -11,7 +11,7 @@ import importlib
 # 添加项目路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cyberclaw.core.skill_loader import load_dynamic_skills, get_skill_count, reload_skills, clear_skill_cache
+from auditronclaw.core.skill_loader import load_dynamic_skills, get_skill_count, reload_skills, clear_skill_cache
 
 
 def create_test_skills(test_dir: str, num_skills: int = 5):
@@ -55,20 +55,20 @@ def test_lazy_loading():
     print("=" * 60)
     
     # 创建临时测试目录
-    temp_dir = tempfile.mkdtemp(prefix="cyberclaw_test_")
+    temp_dir = tempfile.mkdtemp(prefix="auditronclaw_test_")
     skills_dir = create_test_skills(temp_dir, num_skills=5)
     
     # 修改环境变量指向测试目录
-    original_env = os.environ.get("CYBERCLAW_WORKSPACE")
-    os.environ["CYBERCLAW_WORKSPACE"] = temp_dir
+    original_env = os.environ.get("AUDITRONCLAW_WORKSPACE")
+    os.environ["AUDITRONCLAW_WORKSPACE"] = temp_dir
     
     try:
         # 重新导入配置以使用测试目录
-        import cyberclaw.core.config as config_module
+        import auditronclaw.core.config as config_module
         importlib.reload(config_module)
         
         # 重新导入 skill_loader 以使用新的 SKILLS_DIR
-        import cyberclaw.core.skill_loader as skill_loader_module
+        import auditronclaw.core.skill_loader as skill_loader_module
         importlib.reload(skill_loader_module)
         
         # 清除缓存
@@ -156,9 +156,9 @@ def test_lazy_loading():
     finally:
         # 恢复原始环境变量
         if original_env is not None:
-            os.environ["CYBERCLAW_WORKSPACE"] = original_env
+            os.environ["AUDITRONCLAW_WORKSPACE"] = original_env
         else:
-            os.environ.pop("CYBERCLAW_WORKSPACE", None)
+            os.environ.pop("AUDITRONCLAW_WORKSPACE", None)
         
         # 清理临时目录
         shutil.rmtree(temp_dir, ignore_errors=True)

@@ -12,10 +12,10 @@ from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.styles import Style
 from prompt_toolkit.application import get_app
 
-from cyberclaw.core.agent import create_agent_app
-from cyberclaw.core.config import DB_PATH
-from cyberclaw.core.bus import task_queue
-from cyberclaw.core.heartbeat import pacemaker_loop
+from auditronclaw.core.agent import create_agent_app
+from auditronclaw.core.config import DB_PATH
+from auditronclaw.core.bus import task_queue
+from auditronclaw.core.heartbeat import pacemaker_loop
 
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')

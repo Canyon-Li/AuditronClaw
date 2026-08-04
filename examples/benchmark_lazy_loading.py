@@ -9,7 +9,7 @@ import shutil
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cyberclaw.core.skill_loader import load_dynamic_skills, get_skill_count, clear_skill_cache
+from auditronclaw.core.skill_loader import load_dynamic_skills, get_skill_count, clear_skill_cache
 
 
 def create_large_skills(test_dir: str, num_skills: int = 50):
@@ -104,11 +104,11 @@ def benchmark():
     print("=" * 70)
     
     # 创建临时测试目录
-    temp_dir = tempfile.mkdtemp(prefix="cyberclaw_bench_")
+    temp_dir = tempfile.mkdtemp(prefix="auditronclaw_bench_")
     
     # 修改环境变量
-    original_env = os.environ.get("CYBERCLAW_WORKSPACE")
-    os.environ["CYBERCLAW_WORKSPACE"] = temp_dir
+    original_env = os.environ.get("AUDITRONCLAW_WORKSPACE")
+    os.environ["AUDITRONCLAW_WORKSPACE"] = temp_dir
     
     try:
         # 测试不同规模的技能数量
@@ -126,8 +126,8 @@ def benchmark():
             
             # 重新加载配置
             import importlib
-            import cyberclaw.core.config as config_module
-            import cyberclaw.core.skill_loader as skill_loader_module
+            import auditronclaw.core.config as config_module
+            import auditronclaw.core.skill_loader as skill_loader_module
             importlib.reload(config_module)
             importlib.reload(skill_loader_module)
             
@@ -179,9 +179,9 @@ def benchmark():
     finally:
         # 恢复环境
         if original_env is not None:
-            os.environ["CYBERCLAW_WORKSPACE"] = original_env
+            os.environ["AUDITRONCLAW_WORKSPACE"] = original_env
         else:
-            os.environ.pop("CYBERCLAW_WORKSPACE", None)
+            os.environ.pop("AUDITRONCLAW_WORKSPACE", None)
         
         # 清理
         shutil.rmtree(temp_dir, ignore_errors=True)

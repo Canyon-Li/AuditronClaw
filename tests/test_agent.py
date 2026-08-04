@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch, MagicMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from cyberclaw.core.context import AgentState
+from auditronclaw.core.context import AgentState
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 
@@ -13,7 +13,7 @@ class TestAgent(unittest.TestCase):
 
     def test_agent_state_initialization(self):
         """测试 AgentState 的初始化"""
-        from cyberclaw.core.context import AgentState
+        from auditronclaw.core.context import AgentState
 
         initial_state = AgentState(
             messages=[],
@@ -23,12 +23,12 @@ class TestAgent(unittest.TestCase):
         self.assertEqual(initial_state["messages"], [])
         self.assertEqual(initial_state["summary"], "")
 
-    @patch('cyberclaw.core.provider.get_provider')
-    @patch('cyberclaw.core.skill_loader.load_dynamic_skills')
-    @patch('cyberclaw.core.tools.builtins.BUILTIN_TOOLS', [])
+    @patch('auditronclaw.core.provider.get_provider')
+    @patch('auditronclaw.core.skill_loader.load_dynamic_skills')
+    @patch('auditronclaw.core.tools.builtins.BUILTIN_TOOLS', [])
     def test_create_agent_app_basic(self, mock_load_skills, mock_get_provider):
         """测试创建基础代理应用（带 Mock）"""
-        from cyberclaw.core.agent import create_agent_app
+        from auditronclaw.core.agent import create_agent_app
 
         # Mock provider 返回值
         mock_provider = Mock()
@@ -46,12 +46,12 @@ class TestAgent(unittest.TestCase):
             print(f"Unexpected error: {e}")
             raise
 
-    @patch('cyberclaw.core.provider.get_provider')
-    @patch('cyberclaw.core.skill_loader.load_dynamic_skills')
-    @patch('cyberclaw.core.tools.builtins.BUILTIN_TOOLS', [])
+    @patch('auditronclaw.core.provider.get_provider')
+    @patch('auditronclaw.core.skill_loader.load_dynamic_skills')
+    @patch('auditronclaw.core.tools.builtins.BUILTIN_TOOLS', [])
     def test_create_agent_app_with_custom_tools(self, mock_load_skills, mock_get_provider):
         """测试创建带有自定义工具的代理应用（带 Mock）"""
-        from cyberclaw.core.agent import create_agent_app
+        from auditronclaw.core.agent import create_agent_app
         from langchain_core.tools import tool
 
         # Mock provider 返回值
@@ -79,12 +79,12 @@ class TestAgent(unittest.TestCase):
             print(f"Unexpected error: {e}")
             raise
 
-    @patch('cyberclaw.core.provider.get_provider')
-    @patch('cyberclaw.core.skill_loader.load_dynamic_skills')
-    @patch('cyberclaw.core.tools.builtins.BUILTIN_TOOLS', [])
+    @patch('auditronclaw.core.provider.get_provider')
+    @patch('auditronclaw.core.skill_loader.load_dynamic_skills')
+    @patch('auditronclaw.core.tools.builtins.BUILTIN_TOOLS', [])
     def test_create_agent_app_with_checkpointer(self, mock_load_skills, mock_get_provider):
         """测试创建带有检查点的代理应用（带 Mock）"""
-        from cyberclaw.core.agent import create_agent_app
+        from auditronclaw.core.agent import create_agent_app
         from langgraph.checkpoint.memory import MemorySaver
 
         # Mock provider 返回值

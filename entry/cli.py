@@ -8,7 +8,7 @@ from rich.status import Status
 from dotenv import set_key, load_dotenv, unset_key
 import sys
 
-from cyberclaw.core.provider import get_provider
+from auditronclaw.core.provider import get_provider
 from langchain_core.messages import HumanMessage
 
 ENTRY_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -150,7 +150,7 @@ def config_wizard():
     console.print(Panel(
         f"配置已保存至 [#8d52ff]{ENV_PATH}[/#8d52ff]\n"
         f"当前默认提供商: [#8d52ff]{provider}[/#8d52ff] | 模型: [#8d52ff]{model_name}[/#8d52ff]\n\n"
-        f"👉 输入 [bold #00ffff]cyberclaw run[/bold #00ffff] 即可启动系统！",
+        f"👉 输入 [bold #00ffff]auditronclaw run[/bold #00ffff] 即可启动系统！",
         border_style="#00ffff"
     ))
 
@@ -158,7 +158,7 @@ def _show_boot_error():
     console.print(Panel(
         "[bold #00ffff]AuditronClaw未完成配置![/bold #00ffff]\n\n"
         "[#8d52ff]检测到 API Key、模型或Baseurl。请重新执行以下命令完成配置：[/#8d52ff]\n"
-        "[bold #00ffff]cyberclaw config[/bold #00ffff]",
+        "[bold #00ffff]auditronclaw config[/bold #00ffff]",
         title="[bold #8d52ff]⚠️ Boot Sequence Failed[/bold #8d52ff]",
         border_style="#8d52ff"
     ))
@@ -183,15 +183,15 @@ def run_agent():
                 _show_boot_error()
                 raise typer.Exit()
         
-    import entry.main as cyberclaw_main
-    cyberclaw_main.main()
+    import entry.main as auditronclaw_main
+    auditronclaw_main.main()
 
 @app.command("monitor")
 def run_monitor():    
         
     try:
-        import entry.monitor as cyberclaw_monitor
-        cyberclaw_monitor.main()
+        import entry.monitor as auditronclaw_monitor
+        auditronclaw_monitor.main()
     except ImportError as e:
         console.print(f"[bold red]启动失败：找不到监视器模块！[/bold red]\n[dim]请确保 monitor.py 和 cli.py 在同一目录下。\n报错信息: {e}[/dim]")
 

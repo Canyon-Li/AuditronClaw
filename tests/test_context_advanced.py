@@ -5,7 +5,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, Tool
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from cyberclaw.core.context import trim_context_messages, AgentState
+from auditronclaw.core.context import trim_context_messages, AgentState
 
 
 class TestContextTrimming(unittest.TestCase):

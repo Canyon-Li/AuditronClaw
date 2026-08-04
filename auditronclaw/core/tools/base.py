@@ -6,10 +6,10 @@ from pydantic import BaseModel, Field
 
 # 将 LangChain 原生的 @tool 装饰器重命名并暴露出去。
 # 开发者在使用 AuditronClaw 写简单工具时，只需要加一个装饰器和写好 docstring 即可。
-cyberclaw_tool = tool
+auditronclaw_tool = tool
 
 # 类模式工具（适合复杂场景）
-class CyberClawBaseTool(BaseTool, ABC):
+class AuditronClawBaseTool(BaseTool, ABC):
     """
     AuditronClaw 的标准工具基类。
     如果你的工具需要复杂的初始化逻辑（比如维持一个数据库长连接），
@@ -45,7 +45,7 @@ class CyberClawBaseTool(BaseTool, ABC):
 #     b: int = Field(description="第二个加数")
 
 
-# class AddTool(CyberClawBaseTool):
+# class AddTool(AuditronClawBaseTool):
 #     name: str = "add"
 #     description: str = "计算两个数的和"
 #     args_schema: Type[BaseModel] = AddArgs

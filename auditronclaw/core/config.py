@@ -7,7 +7,7 @@ CORE_DIR = os.path.dirname(os.path.abspath(__file__))
 PACKAGE_DIR = os.path.dirname(CORE_DIR)
 PROJECT_ROOT = os.path.dirname(PACKAGE_DIR)
 
-WORKSPACE_DIR = os.getenv("CYBERCLAW_WORKSPACE", os.path.join(PROJECT_ROOT, "workspace"))
+WORKSPACE_DIR = os.getenv("AUDITRONCLAW_WORKSPACE", os.path.join(PROJECT_ROOT, "workspace"))
 
 
 DB_PATH = os.path.join(WORKSPACE_DIR, "state.sqlite3")     # 状态机：潜意识与短期记忆
