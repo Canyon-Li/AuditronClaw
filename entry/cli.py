@@ -19,7 +19,7 @@ os.chdir(PROJECT_ROOT)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-app = typer.Typer(help="CyberClaw - 极客专属的赛博智能终端")
+app = typer.Typer(help="AuditronClaw - 极客专属的赛博智能终端")
 console = Console()
 
 cyber_style = questionary.Style([
@@ -38,8 +38,8 @@ ENV_PATH = os.path.join(PROJECT_ROOT, ".env")
 def config_wizard():
     console.clear()
     console.print(Panel(
-        "👾 Welcome to [bold #8d52ff]CyberClaw[/bold #8d52ff]...\n\n☁️[dim] 请完成模型配置，我们将把密钥安全固化在本地。[/dim]", 
-        title="[bold white]✦  CyberClaw Config[/bold white]", 
+        "👾 Welcome to [bold #8d52ff]AuditronClaw[/bold #8d52ff]...\n\n☁️[dim] 请完成模型配置，我们将把密钥安全固化在本地。[/dim]", 
+        title="[bold white]✦  AuditronClaw Config[/bold white]", 
         border_style="#8d52ff"
     ))
     provider_raw = questionary.select(
@@ -50,7 +50,7 @@ def config_wizard():
     ).ask()
 
     if not provider_raw:
-        console.print("[dim #8d52ff]✦   录入中断，CyberClaw 配置已取消。[/dim #8d52ff]")
+        console.print("[dim #8d52ff]✦   录入中断，AuditronClaw 配置已取消。[/dim #8d52ff]")
         return
 
     provider = provider_raw.split(" ")[0].strip()
@@ -62,7 +62,7 @@ def config_wizard():
     ).ask()
 
     if model_name is None:
-        console.print("[dim #8d52ff]✦   录入中断，CyberClaw 配置已取消。[/dim #8d52ff]")
+        console.print("[dim #8d52ff]✦   录入中断，AuditronClaw 配置已取消。[/dim #8d52ff]")
         return
 
     api_key = ""
@@ -79,7 +79,7 @@ def config_wizard():
         ).ask()
 
         if api_key is None:
-            console.print("[dim #8d52ff]✦   录入中断，CyberClaw 配置已取消。[/dim #8d52ff]")
+            console.print("[dim #8d52ff]✦   录入中断，AuditronClaw 配置已取消。[/dim #8d52ff]")
             return
 
     base_url = ""
@@ -100,7 +100,7 @@ def config_wizard():
         ).ask()
 
     if base_url is None:
-        console.print("[dim #8d52ff]✦   录入中断，CyberClaw 配置已取消。[/dim #8d52ff]")
+        console.print("[dim #8d52ff]✦   录入中断，AuditronClaw 配置已取消。[/dim #8d52ff]")
         return
 
     console.print("\n[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
@@ -156,7 +156,7 @@ def config_wizard():
 
 def _show_boot_error():
     console.print(Panel(
-        "[bold #00ffff]CyberClaw未完成配置![/bold #00ffff]\n\n"
+        "[bold #00ffff]AuditronClaw未完成配置![/bold #00ffff]\n\n"
         "[#8d52ff]检测到 API Key、模型或Baseurl。请重新执行以下命令完成配置：[/#8d52ff]\n"
         "[bold #00ffff]cyberclaw config[/bold #00ffff]",
         title="[bold #8d52ff]⚠️ Boot Sequence Failed[/bold #8d52ff]",

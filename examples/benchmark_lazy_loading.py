@@ -100,7 +100,7 @@ Test Author <test@example.com>
 def benchmark():
     """性能基准测试"""
     print("=" * 70)
-    print("CyberClaw 懒加载性能基准测试")
+    print("AuditronClaw 懒加载性能基准测试")
     print("=" * 70)
     
     # 创建临时测试目录

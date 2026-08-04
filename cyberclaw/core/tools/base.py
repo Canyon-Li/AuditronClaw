@@ -5,13 +5,13 @@ import asyncio
 from pydantic import BaseModel, Field
 
 # 将 LangChain 原生的 @tool 装饰器重命名并暴露出去。
-# 开发者在使用 cyberclaw 写简单工具时，只需要加一个装饰器和写好 docstring 即可。
+# 开发者在使用 AuditronClaw 写简单工具时，只需要加一个装饰器和写好 docstring 即可。
 cyberclaw_tool = tool
 
 # 类模式工具（适合复杂场景）
 class CyberClawBaseTool(BaseTool, ABC):
     """
-    CyberClaw 的标准工具基类。
+    AuditronClaw 的标准工具基类。
     如果你的工具需要复杂的初始化逻辑（比如维持一个数据库长连接），
     或者需要保存内部状态，请继承此类并实现 `_run` 方法。
     """

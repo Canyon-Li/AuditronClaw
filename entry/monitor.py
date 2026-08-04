@@ -26,7 +26,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG_FILE = os.path.join(PROJECT_ROOT, "logs", "local_geek_master.jsonl")
 
 def print_header():
-    """渲染 简约斜体版·CyberClaw 监控面板"""
+    """渲染 简约斜体版·AuditronClaw 监控面板"""
     
     monster = (
         "  ▄█▄▄█▄  \n"
@@ -39,11 +39,11 @@ def print_header():
     content = Text(justify="center")
     content.append("\n  Live Stream  \n\n", style="bold white italic")
     content.append(monster + "\n\n", style="color(141)")
-    content.append("   What is CyberClaw doing?    \n", style="dim white italic") 
+    content.append("   What is AuditronClaw doing?    \n", style="dim white italic") 
 
     panel = Panel(
         Align.center(content),  
-        title="[bold color(141)] CyberClaw [/bold color(141)]",
+        title="[bold color(141)] AuditronClaw [/bold color(141)]",
         title_align="left",
         border_style="color(141)",
         box=box.ROUNDED,

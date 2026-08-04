@@ -20,7 +20,7 @@ PROFILE_PATH = os.path.join(MEMORY_DIR, "user_profile.md")
 @cyberclaw_tool
 def get_system_model_info() -> str:
     """
-    获取当前 CyberClaw 正在运行的底层大模型（LLM）型号和提供商信息。
+    获取当前 AuditronClaw 正在运行的底层大模型（LLM）型号和提供商信息。
     当用户询问“你是基于什么模型”、“你的底层大模型是什么”、“你是GPT还是GLM”、“现在用的什么模型”等身份问题时，调用此工具。
     """
     provider = os.getenv("DEFAULT_PROVIDER", "unknown")

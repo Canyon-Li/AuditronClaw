@@ -53,7 +53,7 @@ def print_banner():
  ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝
 {RESET}"""
 
-    sub_title = f"{WHITE}{BOLD} 👾 Welcome to the {PURPLE}{BOLD}CyberClaw{RESET}{WHITE}{BOLD} !  {RESET}"
+    sub_title = f"{WHITE}{BOLD} 👾 Welcome to the {PURPLE}{BOLD}AuditronClaw{RESET}{WHITE}{BOLD} !  {RESET}"
 
     quotes = [
         "It works on my machine.",
@@ -71,7 +71,7 @@ def print_banner():
 
     tip = (
         f"{PURPLE} ✦ {RESET}"
-        f"{SILVER}{PURPLE}{BOLD}CyberClaw{RESET} 已完成启动。输入命令开始，输入 {PURPLE}/exit{RESET}{SILVER} 退出。{RESET}\n"
+        f"{SILVER}{PURPLE}{BOLD}AuditronClaw{RESET} 已完成启动。输入命令开始，输入 {PURPLE}/exit{RESET}{SILVER} 退出。{RESET}\n"
     )
 
     print(logo)
@@ -233,11 +233,11 @@ async def async_main():
                     
                     await task_queue.put(user_input)
                     if user_input.lower() in ["/exit", "/quit"]:
-                        cprint("  \033[38;5;141m✦ 记忆已固化，CyberClaw 进入休眠。\033[0m")
+                        cprint("  \033[38;5;141m✦ 记忆已固化，AuditronClaw 进入休眠。\033[0m")
                         break
                         
                 except (KeyboardInterrupt, EOFError):
-                    cprint("\n  \033[38;5;141m✦ 强制中断，CyberClaw 进入休眠。\033[0m")
+                    cprint("\n  \033[38;5;141m✦ 强制中断，AuditronClaw 进入休眠。\033[0m")
                     await task_queue.put("/exit")
                     break
 

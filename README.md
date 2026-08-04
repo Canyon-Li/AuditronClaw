@@ -1,18 +1,18 @@
 <div align="center">
 
-![CyberClaw Logo](docs/cyber_logo.png)
+![AuditronClaw Logo](docs/cyber_logo.png)
 
-# CyberClaw
+# AuditronClaw
 
 ###  **当 AI 开始"黑箱操作"，你需要一双透视眼**
 
-[![CyberClaw](https://img.shields.io/badge/CyberClaw-1.0.0-purple.svg?logo=cyberpunk)](https://github.com/ttguy0707/CyberClaw)
+[![AuditronClaw](https://img.shields.io/badge/AuditronClaw-1.0.0-purple.svg?logo=cyberpunk)](https://github.com/Canyon-Li/AuditronClaw)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://python.org)
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.x-blue.svg)](https://langchain-ai.github.io/langgraph/)
 [![LangChain](https://img.shields.io/badge/LangChain-1.x-blue.svg)](https://python.langchain.com/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/Tests-Passing-brightgreen.svg)](tests/)
-[![GitHub](https://img.shields.io/badge/GitHub-@ttguy0707-black.svg?logo=github)](https://github.com/ttguy0707)
+[![GitHub](https://img.shields.io/badge/GitHub-@Canyon-Li-black.svg?logo=github)](https://github.com/Canyon-Li)
 
 **下一代透明智能体架构** · Next-Gen Transparent Agent Architecture
 
@@ -26,9 +26,11 @@ English Nav: [Quick Start](#-quick-start) · [Core Capabilities](#-core-capabili
 
 ---
 
-> 🤖 **你的 AI 在背着你做什么？CyberClaw 让所有行为无所遁形**
+> 🤖 **你的 AI 在背着你做什么？AuditronClaw 让所有行为无所遁形**
 > 
-> 💡 **灵感来源**：受 [OpenClaw](https://github.com/openclaw/openclaw) 的启发，CyberClaw 专注于解决 AI 智能体的透明度和可控性问题。
+> 💡 **灵感来源**：受 [OpenClaw](https://github.com/openclaw/openclaw) 的启发，AuditronClaw 专注于解决 AI 智能体的透明度和可控性问题。
+>
+> 🙏 **致谢**：本项目 fork 自 [CyberClaw](https://github.com/ttguy0707/CyberClaw)（原作者 @ttguy0707），基于 MIT 许可证进行二次开发。原始版权见 [LICENSE](LICENSE)。
 
 ---
 
@@ -37,7 +39,7 @@ English Nav: [Quick Start](#-quick-start) · [Core Capabilities](#-core-capabili
 
 ## 📖 简介
 
-CyberClaw 是一个**企业级透明可控智能体**，重新定义 AI 系统的可信边界：
+AuditronClaw 是一个**企业级透明可控智能体**，重新定义 AI 系统的可信边界：
 
 - **🔍 白盒化决策** → 5 类事件审计 + JSONL 日志 + Rich 监控终端，所有行为可追溯
 - **🛡️ 零信任执行** → 两段式调用（help → run），先看说明书再执行，P0 级事故率降低 80%
@@ -46,7 +48,7 @@ CyberClaw 是一个**企业级透明可控智能体**，重新定义 AI 系统�
 
 ### 🔌 技能生态兼容
 
-CyberClaw 支持**OpenClaw 技能**和**Claude Code 技能**，可直接使用两个生态系统的丰富技能资源，无需重新开发。
+AuditronClaw 支持**OpenClaw 技能**和**Claude Code 技能**，可直接使用两个生态系统的丰富技能资源，无需重新开发。
 
 ### 🌟 核心能力
 
@@ -126,7 +128,7 @@ CyberClaw 支持**OpenClaw 技能**和**Claude Code 技能**，可直接使用�
 - **SKILL.md 规范**：每个技能包含完整说明书
 - **兼容 OpenClaw 和 Claude Code 技能**：可直接使用两个生态系统的技能
 - **推荐技能**：
-  - `skill-creator`：用自然语言让 CyberClaw 自己创建技能
+  - `skill-creator`：用自然语言让 AuditronClaw 自己创建技能
   - `skill-vetter`：检查技能的安全性
   - `mcporter`：连接外部 MCP (Model Context Protocol) 服务
   - `mcp-builder`：构建自己的 MCP 服务
@@ -141,8 +143,8 @@ CyberClaw 支持**OpenClaw 技能**和**Claude Code 技能**，可直接使用�
 
 ```bash
 # 克隆项目
-git clone https://github.com/ttguy0707/CyberClaw.git
-cd CyberClaw
+git clone https://github.com/Canyon-Li/AuditronClaw.git
+cd AuditronClaw
 
 # 安装依赖并注册命令行工具（一步完成）
 pip install -e .
@@ -248,7 +250,7 @@ cyberclaw run
 
 ### ⏰ 心跳任务系统
 
-CyberClaw 内置心跳任务系统（Heartbeat），自动在后台执行定时任务：
+AuditronClaw 内置心跳任务系统（Heartbeat），自动在后台执行定时任务：
 
 - **自动触发**：心跳进程每秒检查任务队列，到点自动触发
 - **循环任务**：支持 daily/weekly/monthly 循环模式
@@ -347,7 +349,7 @@ cyberclaw monitor
 ### 项目结构
 
 ```
-CyberClaw/
+AuditronClaw/
 ├── cyberclaw/                    # 核心包
 │   ├── core/
 │   │   ├── agent.py              # Agent 循环
@@ -429,7 +431,7 @@ cp -r /path/to/skill workspace/office/skills/
 cd workspace/office/skills
 git clone https://github.com/.../skill-creator.git
 
-# 然后用自然语言让 CyberClaw 创建新技能
+# 然后用自然语言让 AuditronClaw 创建新技能
 > 帮我创建一个查询比特币价格的技能
 ```
 
@@ -439,7 +441,7 @@ git clone https://github.com/.../skill-creator.git
 cd workspace/office/skills
 git clone https://github.com/.../skill-vetter.git
 
-# 让 CyberClaw 检查技能安全性
+# 让 AuditronClaw 检查技能安全性
 > 帮我检查一下 weather 技能是否安全
 ```
 
@@ -613,8 +615,8 @@ python3 -c "from tests.test_two_phase_skills import run_tests; run_tests()"
 
 ```bash
 # 克隆项目
-git clone https://github.com/ttguy0707/CyberClaw.git
-cd CyberClaw
+git clone https://github.com/Canyon-Li/AuditronClaw.git
+cd AuditronClaw
 
 # 创建虚拟环境
 python3 -m venv venv
@@ -655,22 +657,22 @@ MIT License
 
 ## 📬 联系方式
 
-- **GitHub**: [@ttguy0707](https://github.com/ttguy0707)
+- **GitHub**: [@Canyon-Li](https://github.com/Canyon-Li)
 - **邮箱**: allen.wtyummy@gmail.com
 
 ---
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=ttguy0707/CyberClaw&type=Date)](https://star-history.com/#ttguy0707/CyberClaw&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=Canyon-Li/AuditronClaw&type=Date)](https://star-history.com/#Canyon-Li/AuditronClaw&Date)
 
 ---
 
 <div align="center">
 
-**👾 CyberClaw · 下一代透明智能体架构**
+**👾 AuditronClaw · 下一代透明智能体架构**
 
-Made with ❤️ by [@ttguy0707](https://github.com/ttguy0707)
+Made with ❤️ by [@Canyon-Li](https://github.com/Canyon-Li)
 
 </div>
 
@@ -679,15 +681,15 @@ Made with ❤️ by [@ttguy0707](https://github.com/ttguy0707)
 <a id="english"></a>
 
 
-> 🤖 **What is your AI doing behind the scenes? CyberClaw makes every action visible.**
+> 🤖 **What is your AI doing behind the scenes? AuditronClaw makes every action visible.**
 >
-> 💡 **Inspired by** [OpenClaw](https://github.com/openclaw/openclaw), CyberClaw focuses on transparency and controllability for AI agents.
+> 💡 **Inspired by** [OpenClaw](https://github.com/openclaw/openclaw), AuditronClaw focuses on transparency and controllability for AI agents.
 
 ---
 
 ## 📖 Introduction
 
-CyberClaw is an **enterprise-grade transparent and controllable agent** that redefines the trust boundary of AI systems:
+AuditronClaw is an **enterprise-grade transparent and controllable agent** that redefines the trust boundary of AI systems:
 
 - **🔍 White-box decisions** -> 5-category event auditing, JSONL logs, and a Rich monitoring terminal make every action traceable
 - **🛡️ Zero-trust execution** -> two-phase invocation (`help` -> `run`) lets the agent read instructions before execution, reducing P0 incident risk by 80%
@@ -696,7 +698,7 @@ CyberClaw is an **enterprise-grade transparent and controllable agent** that red
 
 ### 🔌 Skill Ecosystem Compatibility
 
-CyberClaw supports both **OpenClaw skills** and **Claude Code skills**, so you can reuse rich skill resources from both ecosystems without rebuilding them.
+AuditronClaw supports both **OpenClaw skills** and **Claude Code skills**, so you can reuse rich skill resources from both ecosystems without rebuilding them.
 
 ### 🌟 Core Capabilities
 
@@ -776,7 +778,7 @@ CyberClaw supports both **OpenClaw skills** and **Claude Code skills**, so you c
 - **SKILL.md convention**: each skill contains a complete instruction manual
 - **Compatible with OpenClaw and Claude Code skills**: reuse skills from both ecosystems directly
 - **Recommended skills**:
-  - `skill-creator`: create skills with natural language through CyberClaw
+  - `skill-creator`: create skills with natural language through AuditronClaw
   - `skill-vetter`: check skill safety
   - `mcporter`: connect external MCP (Model Context Protocol) services
   - `mcp-builder`: build your own MCP services
@@ -791,8 +793,8 @@ CyberClaw supports both **OpenClaw skills** and **Claude Code skills**, so you c
 
 ```bash
 # Clone the project
-git clone https://github.com/ttguy0707/CyberClaw.git
-cd CyberClaw
+git clone https://github.com/Canyon-Li/AuditronClaw.git
+cd AuditronClaw
 
 # Install dependencies and register the CLI in one step
 pip install -e .
@@ -876,7 +878,7 @@ cyberclaw run
 
 ### 4️⃣ Basic Usage
 
-After startup, CyberClaw enters the interactive chat interface:
+After startup, AuditronClaw enters the interactive chat interface:
 
 ![Chat Interface](docs/chat.png)
 
@@ -898,7 +900,7 @@ After startup, CyberClaw enters the interactive chat interface:
 
 ### ⏰ Heartbeat Task System
 
-CyberClaw includes a heartbeat task system that automatically executes scheduled tasks in the background:
+AuditronClaw includes a heartbeat task system that automatically executes scheduled tasks in the background:
 
 - **Automatic triggering**: the heartbeat process checks the task queue every second and triggers tasks on time
 - **Recurring tasks**: supports daily, weekly, and monthly recurrence
@@ -997,7 +999,7 @@ cyberclaw monitor
 ### Project Structure
 
 ```
-CyberClaw/
+AuditronClaw/
 ├── cyberclaw/                    # Core package
 │   ├── core/
 │   │   ├── agent.py              # Agent loop
@@ -1080,7 +1082,7 @@ cp -r /path/to/skill workspace/office/skills/
 cd workspace/office/skills
 git clone https://github.com/.../skill-creator.git
 
-# Then ask CyberClaw to create a new skill with natural language
+# Then ask AuditronClaw to create a new skill with natural language
 > Create a skill for querying Bitcoin prices
 ```
 
@@ -1090,7 +1092,7 @@ git clone https://github.com/.../skill-creator.git
 cd workspace/office/skills
 git clone https://github.com/.../skill-vetter.git
 
-# Ask CyberClaw to check skill safety
+# Ask AuditronClaw to check skill safety
 > Check whether the weather skill is safe
 ```
 
@@ -1264,8 +1266,8 @@ Issues and pull requests are welcome.
 
 ```bash
 # Clone the project
-git clone https://github.com/ttguy0707/CyberClaw.git
-cd CyberClaw
+git clone https://github.com/Canyon-Li/AuditronClaw.git
+cd AuditronClaw
 
 # Create a virtual environment
 python3 -m venv venv
@@ -1306,21 +1308,21 @@ MIT License
 
 ## 📬 Contact
 
-- **GitHub**: [@ttguy0707](https://github.com/ttguy0707)
+- **GitHub**: [@Canyon-Li](https://github.com/Canyon-Li)
 - **Email**: allen.wtyummy@gmail.com
 
 ---
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=ttguy0707/CyberClaw&type=Date)](https://star-history.com/#ttguy0707/CyberClaw&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=Canyon-Li/AuditronClaw&type=Date)](https://star-history.com/#Canyon-Li/AuditronClaw&Date)
 
 ---
 
 <div align="center">
 
-**👾 CyberClaw · Next-Gen Transparent Agent Architecture**
+**👾 AuditronClaw · Next-Gen Transparent Agent Architecture**
 
-Made with ❤️ by [@ttguy0707](https://github.com/ttguy0707)
+Made with ❤️ by [@Canyon-Li](https://github.com/Canyon-Li)
 
 </div>

@@ -14,11 +14,11 @@ def main():
         print("ERROR: 未找到 OPENAI_API_KEY，请检查项目根目录的 .env 文件！")
         return
 
-    print("初始化 CyberClaw 核心引擎...")
+    print("初始化 AuditronClaw 核心引擎...")
     
     app = create_agent_app(provider_name="aliyun", model_name="glm-5")
     
-    print("CyberClaw 启动完毕！你可以开始提问了。(输入 'quit' 或 'q' 退出)")
+    print("AuditronClaw 启动完毕！你可以开始提问了。(输入 'quit' 或 'q' 退出)")
     print("-" * 50)
 
     state = {"messages": []}
@@ -26,7 +26,7 @@ def main():
     while True:
         user_input = input("\n[你]: ")
         if user_input.lower() in ['quit', 'q', 'exit']:
-            print("再见，CyberClaw 下线！")
+            print("再见，AuditronClaw 下线！")
             break
         
         if not user_input.strip():
@@ -35,7 +35,7 @@ def main():
         # 把用户的输入包装成 LangChain 标准消息，塞进状态托盘
         state["messages"].append(HumanMessage(content=user_input))
 
-        print("\n[CyberClaw 思考中...]")
+        print("\n[AuditronClaw 思考中...]")
         
         # 使用 stream_mode="updates" 可以让我们精准捕捉到每个节点运行后的增量状态
         for event in app.stream(state, stream_mode="updates"):
@@ -55,7 +55,7 @@ def main():
                         print(f"📥 参数: {tool_call['args']}")
                     elif latest_message.content:
                         # 如果没有调用工具，且有文本内容，说明大模型给出了最终回答
-                        print(f"\n🤖 [CyberClaw]: {latest_message.content}")
+                        print(f"\n🤖 [AuditronClaw]: {latest_message.content}")
                         
                 elif node_name == "tools":
                     # 打印工具执行返回的原始结果
