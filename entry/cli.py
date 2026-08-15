@@ -19,10 +19,10 @@ os.chdir(PROJECT_ROOT)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-app = typer.Typer(help="AuditronClaw - 极客专属的赛博智能终端")
+app = typer.Typer(help="AuditronClaw - 透明可审计的智能体终端")
 console = Console()
 
-cyber_style = questionary.Style([
+ui_style = questionary.Style([
     ('qmark', 'fg:#8d52ff bold'),       
     ('question', 'fg:#00ffff bold'),    
     ('answer', 'fg:#8d52ff bold'),      
@@ -45,7 +45,7 @@ def config_wizard():
     provider_raw = questionary.select(
         "选择你的模型提供商 (Provider):",
         choices=["openai", "anthropic", "aliyun (openai compatible)","tencent (openai compatible)", "z.ai (openai compatible)", "other (openai compatible)", "ollama"],
-        style=cyber_style,
+        style=ui_style,
         instruction="(按上下键选择，回车确认)"
     ).ask()
 
@@ -58,7 +58,7 @@ def config_wizard():
 
     model_name = questionary.text(
         "输入指定的模型型号 (如 gpt-4o-mini, qwen-max, glm-4 等):",
-        style=cyber_style
+        style=ui_style
     ).ask()
 
     if model_name is None:
@@ -75,7 +75,7 @@ def config_wizard():
 
         api_key = questionary.password(
             f"输入你的 {env_key} (对应 {provider_raw}):",
-            style=cyber_style
+            style=ui_style
         ).ask()
 
         if api_key is None:
@@ -86,17 +86,17 @@ def config_wizard():
     if provider in ["openai", "anthropic"]:
         base_url = questionary.text(
             f"输入 {provider} 代理 Base URL (直连请直接回车跳过):",
-            style=cyber_style
+            style=ui_style
         ).ask()
     elif provider == "ollama":
         base_url = questionary.text(
             "输入 Ollama Base URL (默认 http://localhost:11434，直接回车跳过):",
-            style=cyber_style
+            style=ui_style
         ).ask()
     else:
         base_url = questionary.text(
             "输入兼容 Base URL (不填直接回车将使用官方默认地址):",
-            style=cyber_style
+            style=ui_style
         ).ask()
 
     if base_url is None:
@@ -187,8 +187,7 @@ def run_agent():
     auditronclaw_main.main()
 
 @app.command("monitor")
-def run_monitor():    
-        
+def run_monitor():
     try:
         import entry.monitor as auditronclaw_monitor
         auditronclaw_monitor.main()

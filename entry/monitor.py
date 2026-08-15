@@ -10,7 +10,7 @@ from rich import box
 from datetime import datetime
 
 
-cyber_theme = Theme({
+ui_theme = Theme({
     "info": "dim cyan",
     "warning": "color(141)",
     "error": "bold red",
@@ -21,9 +21,11 @@ cyber_theme = Theme({
     "timestamp": "dim white"
 })
 
-console = Console(theme=cyber_theme)
+console = Console(theme=ui_theme)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LOG_FILE = os.path.join(PROJECT_ROOT, "logs", "local_geek_master.jsonl")
+# 会话标识：与主程序 thread_id 对应的日志文件名前缀（阶段2会话隔离时参数化，这里先消除硬编码分散）
+DEFAULT_THREAD_ID = "local_geek_master"
+LOG_FILE = os.path.join(PROJECT_ROOT, "logs", f"{DEFAULT_THREAD_ID}.jsonl")
 
 def print_header():
     """渲染 简约斜体版·AuditronClaw 监控面板"""
@@ -60,7 +62,7 @@ def tail_f(filepath):
         console.print(f"[warning]⏳ 等待日志文件生成...[/warning]")
         while not os.path.exists(filepath):
             time.sleep(0.5)
-            
+
     with open(filepath, 'r', encoding='utf-8') as f:
         f.seek(0, 2)
         print_header()
