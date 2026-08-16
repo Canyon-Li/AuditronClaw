@@ -39,6 +39,12 @@ INJECTION_CASES = [
     "True + True",
     # 名称引用
     "pi",
+    # 完整攻击链(旧实现实测走通):绕过 builtins 清空拿到 os 模块执行命令
+    # __name__ 筛选子类 -> __globals__['sys'] -> modules['os'] -> popen
+    # 全程不需要任何内置函数名,"清空 builtins"对其无效
+    ("[c for c in ().__class__.__bases__[0].__subclasses__() "
+     "if c.__name__ == '_wrap_close'][-1].__init__.__globals__"
+     "['sys'].modules['os'].popen('echo PWNED').read()"),
     # 超长嵌套括号(健壮性)
     "((((((((((1))))))))))+" * 200,
     # 空输入
