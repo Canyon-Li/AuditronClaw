@@ -96,9 +96,12 @@ def test_lazy_loading():
         print(f"[OK] 所有工具都是懒加载模式")
         
         # 测试 4: 模拟首次调用（触发完整加载）
+        # 注意:os.listdir 顺序由文件系统决定(NTFS 字母序,ext4 哈希序),
+        # 不能假设 tools[0] 是 test_skill_0,必须按工具名查找
         print(f"\n[测试 1.4] 模拟首次调用技能（触发完整内容加载）...")
+        tool_0 = next(t for t in tools if t.name == "Test_Skill_0")
         start_time = time.time()
-        result = tools[0].func(mode='help')
+        result = tool_0.func(mode='help')
         elapsed = time.time() - start_time
         print(f"[OK] 首次调用耗时: {elapsed:.4f}秒")
         print(f"[OK] 结果预览: {result[:100]}...")
@@ -107,7 +110,7 @@ def test_lazy_loading():
         # 测试 5: 第二次调用（应该使用缓存）
         print(f"\n[测试 1.5] 第二次调用（应该使用缓存）...")
         start_time = time.time()
-        result2 = tools[0].func(mode='help')
+        result2 = tool_0.func(mode='help')
         elapsed2 = time.time() - start_time
         print(f"[OK] 第二次调用耗时: {elapsed2:.4f}秒")
         if elapsed2 > 0:
@@ -145,7 +148,7 @@ def test_lazy_loading():
         # 再次调用应该重新加载
         print(f"\n[测试 3.2] 缓存清除后首次调用...")
         start_time = time.time()
-        result3 = tools[0].func(mode='help')
+        result3 = tool_0.func(mode='help')
         elapsed3 = time.time() - start_time
         print(f"[OK] 缓存清除后调用耗时: {elapsed3:.4f}秒")
         
