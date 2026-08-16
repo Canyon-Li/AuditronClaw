@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 安装依赖
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      # 豁免项与本地跑法逐字一致,原因:
+      # 1. test_two_phase_skills.py 需要真实 LLM API key(不应进 CI)
+      # 2. test_no_tasks_file 挂在 Windows 文件锁,保持本地/CI 跑法一致
+      - name: 跑全量测试(含红队用例)
+        run: >-
+          pytest tests/
+          --ignore=tests/test_two_phase_skills.py
+          --deselect "tests/test_heartbeat.py::TestHeartbeatPacemaker::test_no_tasks_file"
