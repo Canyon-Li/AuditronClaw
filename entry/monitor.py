@@ -23,7 +23,7 @@ ui_theme = Theme({
 
 console = Console(theme=ui_theme)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# 会话标识：与主程序 thread_id 对应的日志文件名前缀（阶段2会话隔离时参数化，这里先消除硬编码分散）
+# 会话标识：与主程序 thread_id 对应的日志文件名前缀（阶段2会话隔离，--thread 参数化）
 DEFAULT_THREAD_ID = "local_geek_master"
 LOG_FILE = os.path.join(PROJECT_ROOT, "logs", f"{DEFAULT_THREAD_ID}.jsonl")
 
@@ -111,10 +111,11 @@ def render_event(line: str):
             
     except: pass
 
-def main():
+def main(thread_id: str = DEFAULT_THREAD_ID):
+    log_file = os.path.join(PROJECT_ROOT, "logs", f"{thread_id}.jsonl")
     try:
         console.clear()
-        for line in tail_f(LOG_FILE):
+        for line in tail_f(log_file):
             render_event(line)
     except KeyboardInterrupt:
         console.print("\n[warning]✦ 监控网络已断开。[/warning]")

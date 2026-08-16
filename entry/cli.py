@@ -165,7 +165,7 @@ def _show_boot_error():
 
 
 @app.command("run")
-def run_agent():
+def run_agent(thread: str = typer.Option("local_geek_master", "--thread", help="会话标识,独立的历史/日志/画像。默认 local_geek_master 兼容现有数据。")):
     load_dotenv(ENV_PATH)
     provider = os.getenv("DEFAULT_PROVIDER")
     model = os.getenv("DEFAULT_MODEL")
@@ -173,24 +173,24 @@ def run_agent():
         _show_boot_error()
         raise typer.Exit()
     if provider != "ollama":
-        if provider in ["openai", "aliyun", "z.ai", "tencent", "other"]: 
+        if provider in ["openai", "aliyun", "z.ai", "tencent", "other"]:
             if not os.getenv("OPENAI_API_KEY"):
                 _show_boot_error()
                 raise typer.Exit()
-                
+
         elif provider == "anthropic":
             if not os.getenv("ANTHROPIC_API_KEY"):
                 _show_boot_error()
                 raise typer.Exit()
-        
+
     import entry.main as auditronclaw_main
-    auditronclaw_main.main()
+    auditronclaw_main.main(thread_id=thread)
 
 @app.command("monitor")
-def run_monitor():
+def run_monitor(thread: str = typer.Option("local_geek_master", "--thread", help="要监听的会话标识,对应 <thread>.jsonl 日志。")):
     try:
         import entry.monitor as auditronclaw_monitor
-        auditronclaw_monitor.main()
+        auditronclaw_monitor.main(thread_id=thread)
     except ImportError as e:
         console.print(f"[bold red]启动失败：找不到监视器模块！[/bold red]\n[dim]请确保 monitor.py 和 cli.py 在同一目录下。\n报错信息: {e}[/dim]")
 

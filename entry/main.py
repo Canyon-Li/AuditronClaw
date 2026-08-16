@@ -87,9 +87,9 @@ def cprint(text="", end="\n"):
     print_formatted_text(ANSI(str(text)), end=end)
 
 
-async def async_main():
+async def async_main(thread_id: str = "local_geek_master"):
     print_banner()
-    
+
     from dotenv import load_dotenv
     env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
     load_dotenv(env_path)
@@ -98,8 +98,8 @@ async def async_main():
     current_model = os.getenv("DEFAULT_MODEL", "glm-5")
 
     async with AsyncSqliteSaver.from_conn_string(DB_PATH) as memory:
-        app = create_agent_app(provider_name=current_provider, model_name=current_model, checkpointer=memory)
-        config = {"configurable": {"thread_id": "local_geek_master"}}
+        app = create_agent_app(provider_name=current_provider, model_name=current_model, checkpointer=memory, thread_id=thread_id)
+        config = {"configurable": {"thread_id": thread_id}}
 
         class SpinnerState:
             action_words = [
@@ -251,8 +251,8 @@ async def async_main():
             worker.cancel()
             heartbeat_worker.cancel()
 
-def main():
-    asyncio.run(async_main())
+def main(thread_id: str = "local_geek_master"):
+    asyncio.run(async_main(thread_id=thread_id))
 
 if __name__ == "__main__":
     main()

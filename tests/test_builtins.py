@@ -61,25 +61,28 @@ class TestBuiltInTools(unittest.TestCase):
                 result = calculator.invoke({"expression": expr})
                 self.assertIn("计算出错", result)
 
-    @patch('auditronclaw.core.tools.builtins.MEMORY_DIR', new_callable=lambda: tempfile.mkdtemp())
-    @patch('auditronclaw.core.tools.builtins.PROFILE_PATH', new_callable=lambda: tempfile.mktemp())
-    def test_save_user_profile(self, mock_profile_path, mock_memory_dir):
+    def test_save_user_profile(self):
         """测试保存用户档案功能"""
         from auditronclaw.core.tools.builtins import save_user_profile
+        from unittest.mock import patch
 
         import tempfile
         import os
 
-        # 测试保存功能
-        test_content = "# 用户档案\n- 姓名：张三\n- 职业：工程师"
-        result = save_user_profile.invoke({"new_content": test_content})
-        self.assertEqual(result, "记忆档案已成功覆写更新。新的人设画像已生效。")
+        # 用真实临时目录直接替换 MEMORY_DIR(而非 MagicMock,避免 os.path.join 得到 Mock 对象)
+        tmp_memory = tempfile.mkdtemp()
+        with patch('auditronclaw.core.tools.builtins.MEMORY_DIR', tmp_memory):
+            # 测试保存功能
+            test_content = "# 用户档案\n- 姓名：张三\n- 职业：工程师"
+            result = save_user_profile.invoke({"new_content": test_content})
+            self.assertEqual(result, "记忆档案已成功覆写更新。新的人设画像已生效。")
 
-        # 验证文件已创建并包含正确内容
-        self.assertTrue(os.path.exists(mock_profile_path))
-        with open(mock_profile_path, 'r', encoding='utf-8') as f:
-            saved_content = f.read()
-        self.assertEqual(saved_content, test_content)
+            # 默认会话画像落在 profiles/local_geek_master.md
+            mock_profile_path = os.path.join(tmp_memory, "profiles", "local_geek_master.md")
+            self.assertTrue(os.path.exists(mock_profile_path))
+            with open(mock_profile_path, 'r', encoding='utf-8') as f:
+                saved_content = f.read()
+            self.assertEqual(saved_content, test_content)
 
 
 class TestScheduledTasks(unittest.TestCase):

@@ -6,7 +6,9 @@ import os
 import json
 import uuid
 import threading
+from difflib import unified_diff
 from ..config import MEMORY_DIR, TASKS_FILE
+from ..logger import audit_logger
 from .sandbox_tools import (
     list_office_files,
     read_office_file,
@@ -80,21 +82,69 @@ def get_system_model_info() -> str:
     return f"当前使用的模型提供商(Provider)是: {provider}，具体型号(Model)是: {model}。"
 
 
-@auditronclaw_tool
-def save_user_profile(new_content: str) -> str:
-    """
-    更新用户的全局显性记忆档案。
-    当你发现用户的偏好发生改变，或者有新的重要事实需要记录时：
-    1.请先调用 read_user_profile 获取当前的完整档案。
-    2.在你的上下文中，将新信息融入档案，并删去冲突或过时的旧信息。
-    3.将修改后的一整篇完整 Markdown 文本作为 new_content 参数传入此工具。
-    注意：此操作将完全覆盖旧文件！请确保传入的是完整的最新档案。
-    """
-    os.makedirs(MEMORY_DIR, exist_ok=True)
-    with open(PROFILE_PATH, "w", encoding="utf-8") as f:
-        f.write(new_content)
+def _profile_path(thread_id: str) -> str:
+    """按会话返回画像文件路径:memory/profiles/<thread_id>.md"""
+    return os.path.join(MEMORY_DIR, "profiles", f"{thread_id}.md")
 
-    return "记忆档案已成功覆写更新。新的人设画像已生效。"
+
+def create_profile_tool(thread_id: str):
+    """
+    按会话构造 save_user_profile 工具(工厂)。
+    会话身份在此 bake 进闭包——工具层无需知道当前 thread_id,
+    调用方(agent 创建工具时)按会话传入即可。
+    画像写入前读旧内容做行级 diff,记入审计日志(画像变更留痕)。
+    """
+    @auditronclaw_tool
+    def save_user_profile(new_content: str) -> str:
+        """
+        更新当前会话的用户显性记忆档案。
+        当你发现用户的偏好发生改变，或者有新的重要事实需要记录时：
+        1.请先调用 read_user_profile 获取当前的完整档案。
+        2.在你的上下文中，将新信息融入档案，并删去冲突或过时的旧信息。
+        3.将修改后的一整篇完整 Markdown 文本作为 new_content 参数传入此工具。
+        注意：此操作将完全覆盖旧文件！请确保传入的是完整的最新档案。
+        """
+        # 画像路径在调用时解析(而非 bake),便于测试 patch MEMORY_DIR
+        profile_path = _profile_path(thread_id)
+
+        # 写入留痕:写前读旧内容,行级 diff 记入审计日志
+        old_lines = []
+        if os.path.exists(profile_path):
+            with open(profile_path, "r", encoding="utf-8", errors="ignore") as f:
+                old_lines = f.read().splitlines()
+        new_lines = new_content.splitlines()
+
+        diff = "".join(unified_diff(old_lines, new_lines, fromfile="旧画像", tofile="新画像", lineterm=""))
+        if diff:
+            audit_logger.log_event(
+                thread_id=thread_id,
+                event="system_action",
+                content=f"画像变更留痕:\n{diff}"
+            )
+
+        os.makedirs(os.path.dirname(profile_path), exist_ok=True)
+        with open(profile_path, "w", encoding="utf-8") as f:
+            f.write(new_content)
+
+        return "记忆档案已成功覆写更新。新的人设画像已生效。"
+
+    return save_user_profile
+
+
+def migrate_legacy_profile(thread_id: str) -> None:
+    """
+    迁移旧版全局画像:若 memory/user_profile.md 存在且该会话画像不存在,
+    将其移入 memory/profiles/<thread_id>.md。一次性,幂等。
+    """
+    legacy = os.path.join(MEMORY_DIR, "user_profile.md")
+    target = _profile_path(thread_id)
+    if os.path.exists(legacy) and not os.path.exists(target):
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        os.replace(legacy, target)
+
+
+# 默认会话的画像工具(兼容旧调用;agent 应优先用 create_profile_tool 按会话构造)
+save_user_profile = create_profile_tool("local_geek_master")
 
 
 @auditronclaw_tool

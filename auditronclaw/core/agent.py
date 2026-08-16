@@ -5,7 +5,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_core.messages import HumanMessage, RemoveMessage, SystemMessage
 from .context import AgentState, trim_context_messages
 from .provider import get_provider
-from .tools.builtins import BUILTIN_TOOLS
+from .tools.builtins import BUILTIN_TOOLS, create_profile_tool
 from .logger import audit_logger
 from .config import MEMORY_DIR
 from .skill_loader import load_dynamic_skills
@@ -18,11 +18,14 @@ def create_agent_app(
     provider_name: str = "openai",
     model_name: str = "gpt-4o-mini",
     tools: Optional[List[BaseTool]] = None,
-    checkpointer = None
+    checkpointer = None,
+    thread_id: str = "local_geek_master"
 ):
     if tools is None:
         dynamic_tools = load_dynamic_skills()
-        actual_tools = BUILTIN_TOOLS + dynamic_tools
+        # 画像工具按会话构造(替换 BUILTIN_TOOLS 里的默认会话版)
+        profile_tool = create_profile_tool(thread_id)
+        actual_tools = [profile_tool if t.name == "save_user_profile" else t for t in BUILTIN_TOOLS] + dynamic_tools
     else:
         actual_tools = tools
     
@@ -87,8 +90,10 @@ def create_agent_app(
         else:
             active_summary = current_summary
 
-        # 读取用户画像
-        profile_path = os.path.join(MEMORY_DIR, "user_profile.md")
+        # 读取用户画像(按会话隔离:profiles/<thread_id>.md)
+        from .tools.builtins import _profile_path, migrate_legacy_profile
+        migrate_legacy_profile(thread_id)
+        profile_path = _profile_path(thread_id)
         profile_content = "暂无记录"
         if os.path.exists(profile_path):
             with open(profile_path, "r", encoding="utf-8", errors="ignore") as f:

@@ -24,6 +24,7 @@ workspace/state.sqlite3
 workspace/tasks.json
 
 workspace/memory/*.md
+workspace/memory/profiles/
 workspace/office
 
 *.egg-info/
