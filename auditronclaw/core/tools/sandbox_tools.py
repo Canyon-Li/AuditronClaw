@@ -2,7 +2,9 @@ import os
 import subprocess
 from .base import auditronclaw_tool
 from ..config import OFFICE_DIR
+from ..logger import audit_logger
 import re
+import shlex
 import platform
 
 SYS_OS = platform.system()
@@ -16,12 +18,187 @@ def _get_safe_path(relative_path: str) -> str:
     base_dir = os.path.abspath(OFFICE_DIR)
     # 将目标路径转化为绝对路径
     target_path = os.path.abspath(os.path.join(base_dir, relative_path))
-    
+
     # 核心防御：目标路径必须以 OFFICE_DIR 开头！
     if not target_path.startswith(base_dir):
         raise PermissionError(f"越权拦截：你试图访问沙盒外的路径 '{relative_path}'！你只能在 office 工位内活动。")
-    
+
     return target_path
+
+
+# ============ 命令白名单（P0-1/P0-3：正则黑名单 -> 结构化校验） ============
+
+# 紧凑必需集：文件 CRUD / 搜索 / 受限解释器 / 杂项，双语系覆盖
+_ALLOWED_COMMANDS = {
+    # 查看
+    "ls", "dir", "cat", "type", "pwd",
+    # 文件 CRUD
+    "mv", "move", "rm", "del", "cp", "copy", "mkdir", "md", "rmdir", "rd", "touch",
+    # 搜索
+    "grep", "findstr", "find",
+    # 解释器（受限：仅允许跑 office 内脚本文件，见 _validate_interpreter_segment）
+    "python", "python3", "py", "node",
+    # 杂项
+    "echo",
+}
+
+# 解释器命令：参数必须落在 office 内
+_INTERPRETERS = {"python", "python3", "py", "node"}
+
+# 解释器禁止的参数形态：内联代码与模块加载都是任意代码执行入口
+_INTERPRETER_FORBIDDEN_FLAGS = {"-c", "-e", "-m"}
+
+# 通道封杀：环境变量展开（$VAR / %VAR%）、命令替换（反引号 / $(...) / <(...)）
+# 字符级拒绝——这些内容在 shell 解释前就被拦下，不存在"展开后检查"的窗口
+_EXPANSION_PATTERN = re.compile(r"\$|`|<\(|>\(")
+
+# 操作符切段：&& || ; & | ——复合命令每一段都要独立过白名单
+_SEGMENT_SPLIT_PATTERN = re.compile(r"&&|\|\||[;&|]")
+
+# 路径越界参数：绝对路径（Unix 根 / Windows 盘符或反斜杠根）与上跳（..）
+_PATH_ESCAPE_PATTERN = re.compile(r"(?:^|\s|=)(/|\\|[a-zA-Z]:[\\/])|\.\.")
+
+# 重定向目标约束：> file / < file 的 file 必须是 office 内相对路径
+_REDIRECTION_TARGET_PATTERN = re.compile(r"[<>]{1,2}\s*([^\s;|&]+)")
+
+
+def _load_extended_commands():
+    """
+    读取环境变量追加的白名单命令（AUDITRONCLAW_ALLOWED_COMMANDS，逗号分隔）。
+    首次读取到非空扩展时记审计日志——扩展白名单是一次显式的人工授权，必须留痕。
+    """
+    raw = os.getenv("AUDITRONCLAW_ALLOWED_COMMANDS", "")
+    extended = {c.strip().lower() for c in raw.split(",") if c.strip()}
+    if extended:
+        audit_logger.log_event(
+            thread_id="system",
+            event="system_action",
+            content=f"shell 白名单扩展生效（AUDITRONCLAW_ALLOWED_COMMANDS）: {sorted(extended)}"
+        )
+    return extended
+
+
+_EXTENDED_COMMANDS = _load_extended_commands()
+_ALLOWED_COMMANDS |= _EXTENDED_COMMANDS
+
+
+def _is_relative_office_path(arg: str) -> bool:
+    """
+    判断一个命令参数是否是 office 内相对路径：
+    不允许绝对路径（Unix / Windows 盘符）、上跳（..）与用户主目录（~）。
+    """
+    if not arg:
+        return True
+    if _PATH_ESCAPE_PATTERN.search(arg):
+        return False
+    # Windows 盘符（D:x 形态）与网络路径
+    if re.match(r"^[a-zA-Z]:", arg):
+        return False
+    # 用户主目录（~ / ~/xxx / "~..." 引号内形态）——展开后必然越界
+    if arg.lstrip("\"'").startswith("~"):
+        return False
+    return True
+
+
+def _validate_interpreter_segment(tokens):
+    """
+    解释器段专用校验：拒绝 -c/-e/-m（内联代码/模块加载），
+    脚本参数必须是 office 内相对路径（无 .. 无绝对路径）。
+    """
+    flags_and_args = tokens[1:]
+    if not flags_and_args:
+        raise PermissionError(
+            "解释器命令必须指定 office 内的脚本文件（禁止裸启动）"
+        )
+    for arg in flags_and_args:
+        if arg.lower() in _INTERPRETER_FORBIDDEN_FLAGS:
+            raise PermissionError(
+                f"解释器禁止内联代码/模块加载参数（{arg}）。"
+                f"请先把代码写入 office 内文件再执行。"
+            )
+        if not _is_relative_office_path(arg):
+            raise PermissionError(
+                f"解释器参数越界: {arg!r}。脚本必须位于 office 工位内。"
+            )
+
+
+def _validate_segment(segment: str):
+    """
+    校验单个命令段：解析出首 token（命令名）过白名单；
+    参数做 office 内路径约束；解释器段走更严格的专用校验。
+    """
+    try:
+        tokens = shlex.split(segment, posix=False)
+    except ValueError as e:
+        raise PermissionError(f"命令解析失败: {e}")
+
+    if not tokens:
+        return
+
+    # 首 token 可能带路径前缀（./run.sh / skills/x/y.py），只取文件名比对
+    head = tokens[0]
+    head_name = os.path.basename(head.replace("\\", "/").strip('"\''))
+
+    if head_name.lower() not in _ALLOWED_COMMANDS:
+        raise PermissionError(
+            f"命令 '{head_name}' 不在允许清单内。office 沙盒仅放行白名单命令；"
+            f"如需扩展，请设置 AUDITRONCLAW_ALLOWED_COMMANDS 环境变量。"
+        )
+
+    if head_name.lower() in _INTERPRETERS:
+        _validate_interpreter_segment(tokens)
+        return
+
+    # 非解释器命令：参数里的路径同样不许越界
+    for arg in tokens[1:]:
+        if not _is_relative_office_path(arg):
+            raise PermissionError(
+                f"参数越界: {arg!r}。所有路径必须限制在 office 工位内。"
+            )
+
+
+def _validate_command(command: str):
+    """
+    结构化命令白名单（替代旧正则黑名单"五条杀招"）：
+
+    1. 封死展开/替换通道（$ ` %(成对) <( >() ——这些字符在 shell 解释前即被拒
+    2. 重定向目标必须是 office 内相对路径
+    3. shlex 解析后按 && || ; & | 切段，每段独立校验
+    4. 每段首 token（命令名）必须在白名单内
+    5. 解释器段额外拒绝 -c/-e/-m 与越界脚本路径
+
+    校验通过返回 None；任何违规抛 PermissionError。
+    """
+    if not command or not command.strip():
+        raise PermissionError("空命令")
+
+    # 通道封杀：$ 与反引号与进程替换
+    if _EXPANSION_PATTERN.search(command):
+        raise PermissionError(
+            "检测到环境变量展开或命令替换语法（$ ` <( >()，已封禁。"
+            "请使用字面量参数。"
+        )
+
+    # 通道封杀：cmd 风格 %VAR% 展开（成对出现才算变量，单词内孤立 % 不算）
+    if re.search(r"%[^%\s]{1,}%", command):
+        raise PermissionError(
+            "检测到 cmd 变量展开语法（%VAR%），已封禁。请使用字面量参数。"
+        )
+
+    # 重定向目标：> file / < file 的目标必须落在 office 内
+    for match in _REDIRECTION_TARGET_PATTERN.finditer(command):
+        target = match.group(1)
+        if not _is_relative_office_path(target):
+            raise PermissionError(
+                f"重定向目标越界: {target!r}。输出必须落在 office 工位内。"
+            )
+
+    # 复合命令切段：每段独立过白名单
+    segments = _SEGMENT_SPLIT_PATTERN.split(command)
+    for segment in segments:
+        stripped = segment.strip()
+        if stripped:
+            _validate_segment(stripped)
 
 @auditronclaw_tool
 def list_office_files(sub_dir: str = "") -> str:
@@ -112,26 +289,25 @@ def write_office_file(filepath: str, content: str, mode: str = "w") -> str:
 @auditronclaw_tool
 def execute_office_shell(command: str) -> str:
     """
-    在 office 工位中执行 Shell 命令。
-    
-    ⚠️ 【极其重要的环境限制】：
-    1. 💻 跨平台注意：当前宿主机可能是 Windows、Linux 或 Mac。请根据你得到的环境反馈，使用对应的原生 Shell 命令（例如 Win 用 dir/del，Linux 用 ls/rm）。如果命令报错，请自行调整重试！
-    2. 这是一个非交互式终端！所有命令必须携带免确认参数（如 -y, --quiet）。
-    3. 禁止使用 cd 命令跳出当前目录，你的活动范围仅限 office。
-    4. [无状态警告] 每次执行都是独立的终端进程！需要进入子目录请使用“命令链”或相对路径。
-    5. 禁止一切形式跳出office工位!!! 例如运行跳出或查看office路径的任何脚本以及其他高危操作。
+    在 office 工位中执行 Shell 命令（结构化命令白名单管控）。
+
+    ⚠️ 【执行边界（代码强制，非约定）】：
+    1. 命令名白名单：仅放行 ls/dir/cat/type/mv/rm/cp/mkdir/grep/findstr/python/node 等办公与脚本命令，清单外命令一律拒绝。
+    2. 通道封禁：$VAR、%VAR%、反引号、$(...)、<(...) 等展开/替换语法一律拒绝——请直接使用字面量参数。
+    3. 路径约束：所有参数与重定向目标必须位于 office 工位内（相对路径，无 .. 无绝对路径）。
+    4. 解释器受限：python/node 仅允许执行 office 内的脚本文件，禁止 -c/-e/-m 内联代码与模块加载。
+    5. 复合命令（&& || ; |）：每一段都独立过上述校验。
+    6. 💻 跨平台注意：宿主机可能是 Windows/Linux/Mac，请使用对应原生命令（Win 用 dir/del，Linux 用 ls/rm）。
+    7. 非交互式终端：所有命令必须携带免确认参数（如 -y, --quiet）。
+    8. [无状态警告] 每次执行都是独立的终端进程！需要进入子目录请使用"命令链"或相对路径。
+
+    如需运行白名单外的命令，部署者可设置环境变量 AUDITRONCLAW_ALLOWED_COMMANDS（逗号分隔）扩展白名单，扩展生效会记入审计日志。
     """
     try:
-        dangerous_patterns = [
-            r"\.\.",                        # 杀招1：拦截所有相对路径越权 (如 ../)
-            r"(?:^|\s|[<>|&;])/",           # 杀招2：Unix 拦截绝对路径 (连 cat </etc/passwd 这种黑客写法也防了)
-            r"(?:^|\s|[<>|&;])~",           # 杀招3：Unix 拦截用户主目录 (防 ~/.ssh/)
-            r"(?:^|\s|[<>|&;])\\",          # 杀招4：Win 拦截根目录 (防 dir \)
-            r"(?i)(?:^|\s|[<>|&;])[a-z]:",  # 杀招5：Win 拦截直接跳盘符及绝对路径 (防 D:, type C:\...)
-        ]
-        for pattern in dangerous_patterns:
-            if re.search(pattern, command):
-                return f"❌ 权限拒绝：检测到危险的目录跳转指令。你被禁止离开 office 工位！"
+        try:
+            _validate_command(command)
+        except PermissionError as e:
+            return f"❌ 权限拒绝：{e} 你只能在 office 工位内使用白名单命令。"
 
         result = subprocess.run(
             command,
