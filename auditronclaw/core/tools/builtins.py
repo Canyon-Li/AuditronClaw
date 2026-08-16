@@ -1,5 +1,7 @@
 from datetime import datetime
 from .base import auditronclaw_tool, AuditronClawBaseTool
+import ast
+import operator
 import os
 import json
 import uuid
@@ -15,6 +17,52 @@ from .sandbox_tools import (
 
 tasks_lock = threading.Lock()
 PROFILE_PATH = os.path.join(MEMORY_DIR, "user_profile.md")
+
+# AST 节点白名单:calculator 仅接受纯算术表达式(P0-2,eval RCE 修复)
+_BIN_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+_UNARY_OPS = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+}
+
+
+def _eval_node(node):
+    """递归求值,只放行白名单节点;其余一律 ValueError。"""
+    if isinstance(node, ast.Expression):
+        return _eval_node(node.body)
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+            return node.value
+        raise ValueError(f"不支持的常量类型: {type(node.value).__name__}")
+    if isinstance(node, ast.BinOp):
+        op_type = type(node.op)
+        if op_type not in _BIN_OPS:
+            raise ValueError(f"不支持的运算符: {op_type.__name__}")
+        return _BIN_OPS[op_type](_eval_node(node.left), _eval_node(node.right))
+    if isinstance(node, ast.UnaryOp):
+        op_type = type(node.op)
+        if op_type not in _UNARY_OPS:
+            raise ValueError(f"不支持的运算符: {op_type.__name__}")
+        return _UNARY_OPS[op_type](_eval_node(node.operand))
+    raise ValueError(f"不允许的表达式节点: {type(node).__name__}")
+
+
+def _safe_eval_expression(expression: str) -> float:
+    """AST 节点白名单求值:仅四则/幂/取模/括号/一元正负与数字常量。
+
+    属性链、函数调用、名称引用等在语法树阶段即被拒绝,
+    从结构上封死 eval 注入逃逸(如 __import__ / __class__ 链)。
+    """
+    tree = ast.parse(expression, mode="eval")
+    return _eval_node(tree)
 
 
 @auditronclaw_tool
@@ -63,14 +111,11 @@ def get_current_time() -> str:
 def calculator(expression: str) -> str:
     """
     一个简单的数学计算器。
-    用于计算基础的数学表达式，例如: '3 * 5' 或 '100 / 4'。
-    注意：参数 expression 必须是一个合法的 Python 数学表达式字符串。
+    用于计算基础的算术表达式，例如: '3 * 5'、'100 / 4' 或 '2 ** 10'。
+    支持: 加减乘除、整除、取模、幂、括号、一元正负号，操作数为整数或小数。
     """
     try:
-        # 警告: eval 在真实的生产环境中存在注入风险！
-        # 这里仅为了搭建核心层做快速 Demo。未来在生产级扩展中，
-        # 应该替换为基于 AST 的安全解析器，或者更专业的数学库（如 numexpr）。
-        result = eval(expression, {"__builtins__": {}}, {})
+        result = _safe_eval_expression(expression)
         return f"表达式 '{expression}' 的计算结果是: {result}"
     except Exception as e:
         return f"计算出错，请检查表达式格式。错误信息: {str(e)}"
