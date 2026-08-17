@@ -34,3 +34,5 @@ workspace/office
 docs/local
 .vscode/
 .vscode/settings.json
+# 注入基准运行结果(时间戳目录,含 LLM 原始输出)
+benchmarks/results/
