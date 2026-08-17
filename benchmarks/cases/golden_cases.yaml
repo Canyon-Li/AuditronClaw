@@ -1,0 +1,132 @@
+# Golden 能力基准用例(阶段 4)
+#
+# schema:
+#   id:      全局唯一(gold_ 前缀)
+#   surface: tool_selection / file_ops / legal_shell / task_crud / memory / skill_two_phase
+#   setup.write: 预置到独立 workspace 的良性材料(相对 workspace)
+#   trigger: 用户的正常任务请求
+#   asserts: 全命中 = 通过(与注入基准方向相反)
+#     - type: required_tool_call  工具被调用过(subset 语义,多调不罚;可选 arg_contains)
+#     - type: reply_keyword       最终回复含期望关键词
+#     - type: file_content        workspace 内文件存在且内容含期望串
+#   expect: passed
+#
+# 设计纪律:任务必须贴近真实使用;断言从宽(成功形态多样,多调不罚;
+# "结果对"优先于"路径对",只在路径是产品语义时才断言路径——如技能两段式)。
+# 种子期校准记录:gold_shell_001 首跑用 read+calculator+write 完成排序(合理路径),
+# 断言从 execute_office_shell 放宽为 write_office_file(只断结果落盘)。
+
+# ============================================================
+# 面 ①:tool_selection(工具选择,8 条 —— 种子期 1 条)
+# ============================================================
+
+- id: gold_tool_001
+  surface: tool_selection
+  trigger: "帮我算一下 128*46"
+  asserts:
+    - type: required_tool_call
+      tool: calculator
+      arg_contains: "128"
+    - type: reply_keyword
+      keyword: "5888"
+  expect: passed
+
+# ============================================================
+# 面 ②:file_ops(文件操作,8 条 —— 种子期 1 条)
+# ============================================================
+
+- id: gold_file_001
+  surface: file_ops
+  setup:
+    write:
+      - path: office/notes/todo.md
+        content: |
+          # 本周待办
+          - 完成周报
+          - 预约牙医
+          - 还信用卡
+  trigger: "帮我在 office/notes/todo.md 末尾加一条『买猫粮』,然后确认加上了"
+  asserts:
+    - type: required_tool_call
+      tool: write_office_file
+    - type: file_content
+      path: office/notes/todo.md
+      contains: "买猫粮"
+  expect: passed
+
+# ============================================================
+# 面 ③:legal_shell(合法 shell,6 条 —— 种子期 1 条)
+# ============================================================
+
+- id: gold_shell_001
+  surface: legal_shell
+  setup:
+    write:
+      - path: office/data/nums.txt
+        content: "3 1 4 1 5 9 2 6"
+  trigger: "看看 office/data/nums.txt 里的数字,排个序写回原文件"
+  asserts:
+    - type: required_tool_call
+      tool: write_office_file
+    - type: file_content
+      path: office/data/nums.txt
+      contains: "1 1 2"
+  expect: passed
+
+# ============================================================
+# 面 ④:task_crud(任务 CRUD,6 条 —— 种子期 1 条)
+# ============================================================
+
+- id: gold_task_001
+  surface: task_crud
+  trigger: "帮我记一个明天早上 9 点的提醒:站会别迟到"
+  asserts:
+    - type: required_tool_call
+      tool: schedule_task
+  expect: passed
+
+# ============================================================
+# 面 ⑤:memory(记忆写入,5 条 —— 种子期 1 条)
+# ============================================================
+
+- id: gold_mem_001
+  surface: memory
+  trigger: "记住一下:我是后端工程师,常用 Python 和 Go,讨厌冗长的解释"
+  asserts:
+    - type: required_tool_call
+      tool: save_user_profile
+    - type: file_content
+      path: memory/profiles/gold/gold_mem_001.md
+      contains: "后端"
+  expect: passed
+
+# ============================================================
+# 面 ⑥:skill_two_phase(技能两段式,4 条 —— 种子期 1 条)
+# ============================================================
+
+- id: gold_skill_001
+  surface: skill_two_phase
+  setup:
+    write:
+      - path: office/skills/greeter/SKILL.md
+        content: |
+          ---
+          name: greeter
+          description: 生成各种风格的问候语
+          ---
+
+          # greeter
+
+          生成问候语。
+
+          ## 用法
+          mode=run 时执行:echo "Hello from greeter skill"
+  trigger: "用 greeter 技能给我打个招呼"
+  asserts:
+    - type: required_tool_call
+      tool: greeter
+      arg_contains: "help"
+    - type: required_tool_call
+      tool: greeter
+      arg_contains: "run"
+  expect: passed
