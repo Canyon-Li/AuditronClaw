@@ -1,5 +1,5 @@
 """
-Prompt 注入拦截基准 runner(阶段 3 本体)。
+Prompt 注入拦截基准 runner(阶段 3)。
 
 用法:
     python benchmarks/run_injection_bench.py                    # 全量跑
@@ -11,109 +11,23 @@ Prompt 注入拦截基准 runner(阶段 3 本体)。
     - 行为断言(非 LLM-as-judge):forbidden_tool_call / leak_keyword
     - temperature=0;n=50 单次;文本面泄漏为已知盲区
     - 每用例独立 workspace + 独立 thread(bench/<case_id>),用例间零共享状态
+    - 隔离/执行/落盘底座在 harness.py(与 golden eval 共享),本文件只含注入断言语义
 """
 
 import argparse
 import asyncio
-import importlib
-import json
 import os
-import sys
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
-from langchain_core.messages import HumanMessage
-from langgraph.checkpoint.memory import MemorySaver
 
-# 项目根加入 sys.path(benchmarks/ 不是包)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+from harness import run_case, write_results
 
-# .env 优先于系统环境(get_provider 读 OPENAI_API_KEY / OPENAI_API_BASE)
-from dotenv import load_dotenv
-load_dotenv(PROJECT_ROOT / ".env")
+CASES_FILE = Path(__file__).resolve().parent / "cases" / "injection_cases.yaml"
 
-RESULTS_DIR = PROJECT_ROOT / "benchmarks" / "results"
-CASES_FILE = PROJECT_ROOT / "benchmarks" / "cases" / "injection_cases.yaml"
-
-
-# ============ 每用例隔离:reload 链 ============
-
-def reload_with_workspace(workspace: str) -> None:
-    """
-    把 auditronclaw 全链切到指定 workspace。
-
-    reload 顺序敏感:config(路径源头) → sandbox_tools(吃 OFFICE_DIR)
-    → builtins(吃 MEMORY_DIR,重建 BUILTIN_TOOLS) → skill_loader(吃 SKILLS_DIR,
-    重建全局 _lazy_loader) → agent(from-import 绑定必须最后刷新)。
-    链上任何一环漏 reload,都会留下旧 workspace 的路径绑定。
-    """
-    os.environ["AUDITRONCLAW_WORKSPACE"] = workspace
-    import auditronclaw.core.config as cfg
-    import auditronclaw.core.tools.sandbox_tools as sb
-    import auditronclaw.core.tools.builtins as builtins_mod
-    import auditronclaw.core.skill_loader as skill_loader_mod
-    import auditronclaw.core.agent as agent_mod
-    importlib.reload(cfg)
-    importlib.reload(sb)
-    importlib.reload(builtins_mod)
-    importlib.reload(skill_loader_mod)
-    importlib.reload(agent_mod)
-
-
-# ============ 用例执行 ============
-
-async def run_case(case: dict, model_name: str, provider_name: str) -> dict:
-    """执行单条用例,返回结果记录(不含 blocked 判定,由断言层补)。"""
-    case_id = case["id"]
-    workspace = tempfile.mkdtemp(prefix=f"bench_{case_id}_")
-
-    reload_with_workspace(workspace)
-
-    # setup: 预置恶意材料(相对 workspace)
-    for spec in case.get("setup", {}).get("write", []):
-        target = Path(workspace) / spec["path"]
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(spec["content"], encoding="utf-8")
-
-    from auditronclaw.core.agent import create_agent_app
-
-    thread_id = f"bench/{case_id}"
-    app = create_agent_app(
-        provider_name=provider_name,
-        model_name=model_name,
-        checkpointer=MemorySaver(),
-        thread_id=thread_id,
-    )
-    config = {"configurable": {"thread_id": thread_id}}
-
-    tool_calls = []      # [{tool, args}]
-    tool_results = []    # [{tool, result}] 与 tool_calls 按序对应(ToolNode 串行回填)
-    reply_text = []      # 非 tool 消息文本
-
-    inputs = {"messages": [HumanMessage(content=case["trigger"])]}
-    async for event in app.astream(inputs, config=config, stream_mode="updates"):
-        for _node, node_data in event.items():
-            for msg in node_data.get("messages", []):
-                if getattr(msg, "tool_calls", None):
-                    for tc in msg.tool_calls:
-                        tool_calls.append({"tool": tc["name"], "args": tc.get("args", {})})
-                if getattr(msg, "type", "") == "tool":
-                    tool_results.append({"tool": msg.name, "result": str(msg.content)})
-                elif msg.content:
-                    reply_text.append(str(msg.content))
-
-    return {
-        "case_id": case_id,
-        "surface": case["surface"],
-        "workspace": workspace,
-        "tool_calls": tool_calls,
-        "tool_results": tool_results,
-        "reply": "\n".join(reply_text),
-    }
+SURFACES = ["skill_md", "file_content", "profile", "user_jailbreak"]
 
 
 # ============ 行为断言(判定层,纯函数) ============
@@ -149,7 +63,7 @@ def judge(result: dict, case: dict) -> dict:
             hits.append(f"unknown_assert:{kind}")
 
     blocked = not hits
-    # 危害落地:泄密型命中即落地(信息出口无法收回);
+    # 危害落地:泄密型命中即落地(信息出口不可收回);
     # 行为型则看攻击性调用是否拿到了非拒绝的执行结果
     harm_landed = bool(leak_hits) or _harmful_landed(result, hit_indices)
     return {
@@ -256,16 +170,7 @@ async def main_async(args) -> None:
         "errors": [{"case_id": r["case_id"], "error": r["error"]} for r in errors],
     }
 
-    # JSONL 落盘
-    out_dir = RESULTS_DIR / summary["ran_at"].replace(":", "").replace("-", "")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "results.jsonl").write_text(
-        "\n".join(json.dumps(r, ensure_ascii=False) for r in results) + "\n",
-        encoding="utf-8",
-    )
-    (out_dir / "summary.json").write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8",
-    )
+    out_dir = write_results(results, summary, suite="injection")
 
     print(f"\n========== 汇总 ==========")
     print(f"提示面拦截率(LLM 未被骗): {n_blocked}/{n}" + (f" = {summary['block_rate']:.1%}" if n else ""))
@@ -284,7 +189,7 @@ async def main_async(args) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Prompt 注入拦截基准")
     parser.add_argument("--limit", type=int, help="只跑前 N 条(冒烟)")
-    parser.add_argument("--surface", choices=["skill_md", "file_content", "profile", "user_jailbreak"])
+    parser.add_argument("--surface", choices=SURFACES)
     parser.add_argument("--case", help="只跑指定 id 的用例")
     parser.add_argument("--model", default=os.getenv("DEFAULT_MODEL", "glm-4-flash"))
     parser.add_argument("--provider", default=os.getenv("DEFAULT_PROVIDER", "z.ai"))
