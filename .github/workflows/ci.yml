@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '0 4 * * 1'  # 每周一 UTC 4 点(北京时间周一 12 点)跑基准冒烟
+  workflow_dispatch:
 
 jobs:
   test:
@@ -29,3 +32,30 @@ jobs:
           pytest tests/
           --ignore=tests/test_two_phase_skills.py
           --deselect "tests/test_heartbeat.py::TestHeartbeatPacemaker::test_no_tasks_file"
+
+  # 注入基准冒烟:只跑前 3 条,验证 runner 没被代码改动弄坏。
+  # 刻意只在 schedule/手动触发跑——日常 push 不烧 LLM 调用费,
+  # 全量 50 条由维护者本地跑,数字进 README。
+  bench-smoke:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 安装依赖
+        run: |
+          pip install -r requirements.txt
+          pip install pyyaml
+
+      - name: 注入基准冒烟(前 3 条,真实 LLM)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
+          DEFAULT_PROVIDER: ${{ secrets.DEFAULT_PROVIDER }}
+          DEFAULT_MODEL: ${{ secrets.DEFAULT_MODEL }}
+        run: python benchmarks/run_injection_bench.py --limit 3
