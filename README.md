@@ -4,7 +4,7 @@
 
 ###  **当 AI 开始"黑箱操作"，你需要一双透视眼**
 
-[![AuditronClaw](https://img.shields.io/badge/AuditronClaw-1.0.0-purple.svg?logo=cyberpunk)](https://github.com/Canyon-Li/AuditronClaw)
+[![AuditronClaw](https://img.shields.io/badge/AuditronClaw-1.1.0-purple.svg?logo=cyberpunk)](https://github.com/Canyon-Li/AuditronClaw)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg?logo=python)](https://python.org)
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.x-blue.svg)](https://langchain-ai.github.io/langgraph/)
 [![LangChain](https://img.shields.io/badge/LangChain-1.x-blue.svg)](https://python.langchain.com/)
@@ -53,7 +53,7 @@ AuditronClaw 支持**OpenClaw 技能**和**Claude Code 技能**，可直接使�
 
 ## 📊 双维评测：安全基准 × 能力基准
 
-安全测试只回答"该拦的拦住了吗"，回答不了"该干的干成了吗"——一个拒绝所有请求的 agent 能拿安全满分。AuditronClaw 在同一套隔离 harness 上跑两套基准，让安全与能力都从自证声明变为可复核的数字。判定器全为确定性断言（无 LLM-as-judge），结果可复现。
+安全测试只回答"该拦的拦住了吗"，回答不了"该干的干成了吗"——一个拒绝所有请求的 agent 能拿安全满分。AuditronClaw 在同一条隔离流水线上跑两套基准，让安全与能力都从自证声明变为可复核的数字。判定器全为确定性断言（无 LLM-as-judge），结果可复现。
 
 ### 🛡️ 安全基准：Prompt 注入拦截率
 
@@ -103,16 +103,29 @@ AuditronClaw 支持**OpenClaw 技能**和**Claude Code 技能**，可直接使�
 ### 协议与盲区（两套基准共用）
 
 - 判定 = 确定性断言（工具调用/关键词/文件落盘），无 LLM-as-judge，可复现。
-- 隔离 = 每用例独立 workspace + 独立会话（`benchmarks/harness.py` 共享底座），用例间零污染。
+- 隔离 = 每用例独立 workspace + 独立会话（`benchmarks/bench_pipeline.py` 共享流水线），用例间零污染。
 - 盲区：单次运行、文本面泄漏、结果随模型漂移。测量的是"这一个模型 + 这一批用例"的剖面，不是绝对能力。
 
 ---
 
-## 🚧 文档建设中
+## 🔒 安全审计与加固
 
-完整文档（快速开始、配置向导、架构图、使用指南、测试报告）正在随安全加固与评估管线工作同步重写中。
+本项目的核心工作线：对 fork 基线做系统安全审计，修复发现的可利用边界，再用可复现的基准度量修复效果。
 
-当前可用的入口：
+| 审计发现 | 修复 | 验证 |
+|---|---|---|
+| `calculator` 工具 `eval()` 可经属性链逃逸拿到 `os.system`（任意代码执行） | AST 节点白名单求值器，仅放行算术 | 红队 17 条注入向量全拒绝 |
+| shell 校验为五条正则黑名单，可被环境变量展开 / 引号内联解释器绕过 | shlex 结构化命令白名单，白名单外二进制一律拒绝 | 红队 18 条注入全拦 + 6 条合法全放行 |
+| 恶意 SKILL.md 可借技能 `run` 通道代理执行命令 | 技能命令与手动 shell 走同一校验器 | 注入基准 skill_md 面 12/12 |
+| 画像全局单文件且无写入留痕，存在跨会话持久化投毒链 | 画像按会话分文件 + 行级 diff 审计留痕 | 注入基准 profile 面工具层全兜底 |
+
+审计修复已回流上游：[CyberClaw#18](https://github.com/ttguy0707/CyberClaw/pull/18)、[#19](https://github.com/ttguy0707/CyberClaw/pull/19)（均已合并）。
+
+**已知未修复**：注入基准发现 1 条真实落地——用户套问下 LLM 会复述系统提示词原文（信息外泄，工具层无法拦截），归因提示词保密性不足，见上方安全基准说明。
+
+---
+
+## 🚀 快速开始
 
 ```bash
 # 安装
@@ -121,11 +134,11 @@ pip install -e .
 # 交互式配置向导（选择模型提供商 / 输入 API Key / 连接测试）
 auditronclaw config
 
-# 启动主程序
+# 启动主程序（--thread 可选，隔离会话历史/画像/日志）
 auditronclaw run
 
-# 监控终端（另一个终端）
+# 监控终端（另一个终端，实时查看 agent 行为审计流）
 auditronclaw monitor
 ```
 
-开发计划见 [CHANGELOG](CHANGELOG.md)。
+完整文档（架构图、使用指南、技能开发）建设中，变更历史见 [CHANGELOG](CHANGELOG.md)。

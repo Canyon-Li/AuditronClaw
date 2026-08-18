@@ -38,33 +38,33 @@ def print_banner():
     WHITE = '\033[37m'
 
     logo = f"""{CYAN}{BOLD}
- ██████╗██╗   ██╗██████╗ ███████╗██████╗
-██╔════╝╚██╗ ██╔╝██╔══██╗██╔════╝██╔══██╗
-██║      ╚████╔╝ ██████╔╝█████╗  ██████╔╝
-██║       ╚██╔╝  ██╔══██╗██╔══╝  ██╔══██╗
-╚██████╗   ██║   ██████╔╝███████╗██║  ██║
- ╚═════╝   ╚═╝   ╚═════╝ ╚══════╝╚═╝  ╚═╝
+ █████╗ ██╗   ██╗██████╗ ██╗████████╗██████╗  ██████╗ ███╗   ██╗
+██╔══██╗██║   ██╗██╔══██╗██║╚══██╔══╝██╔══██╗██╔═══██╗████╗  ██║
+███████║██║   ██║██║  ██║██║   ██║   ██████╔╝██║   ██║██╔██╗ ██║
+██╔══██║██║   ██║██║  ██║██║   ██║   ██╔══██╗██║   ██║██║╚██╗██║
+██║  ██║╚██████╔╝██████╔╝██║   ██║   ██║  ██║╚██████╔╝██║ ╚████║
+╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝
 
  ██████╗██╗      █████╗ ██╗    ██╗
-██╔════╝██║     ██╔══██╗██║    ██║
+██╔════╝██║     ██╔══██║██║    ██║
 ██║     ██║     ███████║██║ █╗ ██║
 ██║     ██║     ██╔══██║██║███╗██║
 ╚██████╗███████╗██║  ██║╚███╔███╔╝
  ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝
 {RESET}"""
 
-    sub_title = f"{WHITE}{BOLD} 👾 Welcome to the {PURPLE}{BOLD}AuditronClaw{RESET}{WHITE}{BOLD} !  {RESET}"
+    sub_title = f"{WHITE}{BOLD} 👾 透明可审计的智能体终端 · {PURPLE}{BOLD}AuditronClaw{RESET}{WHITE}{BOLD}  {RESET}"
 
     quotes = [
-        "It works on my machine.",
-        "It compiles! Ship it.",
-        "Git commit, push, pray.",
-        "There's no place like 127.0.0.1.",
-        "sudo make me a sandwich.",
-        "Works fine in dev.",
-        "May the source be with you.",
-        "Ctrl+C, Ctrl+V, Deploy.",
-        "Hello, World."
+        "Trust, but verify.",
+        "Logs don't lie. Agents might.",
+        "Every action leaves a trace.",
+        "The sandbox remembers.",
+        "Who audits the auditor?",
+        "With great autonomy comes great logging.",
+        "Injection attempted, injection rejected.",
+        "Zero trust, full transparency.",
+        "It's not a bug, it's an audit finding."
     ]
     quote = random.choice(quotes)
     meta = f" {SILVER}✦{RESET} {CYAN}{quote}{RESET}"

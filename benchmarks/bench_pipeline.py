@@ -1,12 +1,16 @@
 """
-基准共享底座(harness):注入基准与 golden eval 共用的隔离/执行/落盘设施。
+基准流水线(bench_pipeline):注入基准与 golden eval 共用的用例处理管线。
+
+每条用例流过六个工位:
+    隔离(reload 链切 workspace)→ 预置材料(setup.write)→ 驱动(astream 跑 agent)
+    → 收集(轨迹结构化)→ 判定(交给各 runner,断言语义不同)→ 落盘(JSONL)
 
 职责边界:
-- runner 负责"跑哪些用例 + 怎么判定"(断言语义各 suite 不同)
-- harness 负责"怎么跑一条用例"(隔离 workspace → 预置材料 → astream 收集轨迹)
+- runner 负责"跑哪些用例 + 怎么判定"
+- pipeline 负责"一条用例怎么流过去"——agent 是工位上的设备,可替换,管线不动
 
 用法:
-    from harness import run_case, write_results
+    from bench_pipeline import run_case, write_results
     raw = await run_case(case, model, provider)   # 返回 tool_calls/tool_results/reply
 """
 
