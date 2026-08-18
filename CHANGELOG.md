@@ -1,152 +1,34 @@
 # AuditronClaw 变更日志
 
-## [Unreleased]
+## [1.1.0] - 2026-08-18
 
-### 新增
+从 [CyberClaw](https://github.com/ttguy0707/CyberClaw) fork 后的首个正式版本：完成安全审计与加固，建立双维评测管线。
 
-- ✨ **懒加载技能加载器** (auditronclaw/core/skill_loader.py)
-  - 实现渐进式加载机制，启动时只扫描元数据
-  - 首次调用技能时才加载完整内容
-  - LRU 缓存策略（最大 50 个技能）
-  - 支持热更新，无需重启 Agent
+### 🔒 安全加固
 
-- 📚 **新文档**
-  - `docs/LAZY_LOADING_GUIDE.md` - 懒加载使用指南
-  - `docs/LAZY_LOADING_SUMMARY.md` - 实现总结文档
+- **calculator eval 注入修复**：`eval()` 求值替换为 AST 节点白名单求值器，仅放行算术节点。原实现可通过 `__class__.__bases__` 属性链逃逸获得 `os.system`，等于任意代码执行
+- **shell 命令校验重构**：五条正则黑名单替换为 shlex 结构化命令白名单（`execute_office_shell`）。原实现可被环境变量展开（`cat $HOME/.ssh/id_rsa`）、引号包裹的内联解释器（`python -c ...`）等绕过；白名单外的二进制一律拒绝，可经 `AUDITRONCLAW_ALLOWED_COMMANDS` 显式扩展
+- **技能 run 命令面闭合**：技能 `run` 模式的命令与手动 shell 走同一校验器，恶意 SKILL.md 无法借技能通道代理执行越权命令
+- **会话隔离**：`--thread` 参数化（对话历史/审计日志按会话分文件），长期画像从全局单文件改为 `memory/profiles/<thread_id>.md` 按会话存储并保留写入留痕（行级 diff 记审计日志），封死"画像污染 → 跨会话持久化注入"链
 
-- 🧪 **新测试**
-  - `tests/test_lazy_loader.py` - 懒加载功能完整测试
-  - `examples/benchmark_lazy_loading.py` - 性能基准测试
+### 📊 双维评测管线
 
-### 改进
+- **注入拦截基准**（`benchmarks/run_injection_bench.py`）：50 条恶意用例覆盖四个入口面（恶意 SKILL.md / 文件内容注入 / 污染画像 / 直接越狱），双层判定（提示面拦截率 77.5% × 危害落地率 2.0%），每用例独立 workspace 隔离
+- **Golden 能力基准**（`benchmarks/run_golden_eval.py`）：37 条正常任务覆盖六个能力面，判定器全确定性断言（无 LLM-as-judge），副作用任务双锚断言（工具调用 + 落盘终态）。任务达成率 83.8%，安全假阳性（over_refusal）0 条
+- **共享流水线**（`benchmarks/bench_pipeline.py`）：reload 链隔离 + astream 轨迹收集 + JSONL 落盘，两套基准零重复代码
 
-- ⚡ **性能提升**
-  - 启动速度提升 99.98%（2000ms → 0.4ms for 100 skills）
-  - 内存占用降低 80%（250KB → 50KB for 100 skills）
-  - 支持无限数量技能扩展
+### 🏗️ 基础设施
 
-- 🔧 **API 扩展**
-  - `load_dynamic_skills(force_rescan=False)` - 支持强制重新扫描
-  - `reload_skills()` - 强制重新加载所有技能
-  - `get_skill_count()` - 获取技能数量（不触发加载）
-  - `clear_skill_cache()` - 手动清除缓存
+- **CI**：GitHub Actions 全量测试（62 用例含红队）+ 每周双基准冒烟（schedule/手动触发，日常 push 不消耗 API 配额）
+- **修复打包缺陷**：补 `auditronclaw/core/tools/__init__.py`——此前 `find_packages()` 不收录该子包，pip 安装后 CLI 启动即 `ModuleNotFoundError`（源码目录运行不触发，故长期未被发现）
 
-### 修复
+### ✅ 上游回流
 
-- 🐛 修复 Windows 系统上的 Unicode 编码问题
-- 🐛 修复测试文件中的路径问题
-- 🐛 修复性能基准测试中的 f-string 格式化错误
+- [CyberClaw#18](https://github.com/ttguy0707/CyberClaw/pull/18)：calculator eval RCE 修复（已合并）
+- [CyberClaw#19](https://github.com/ttguy0707/CyberClaw/pull/19)：shell 白名单重构（已合并）
 
-### 向后兼容
+---
 
-- ✅ 完全向后兼容现有代码
-- ✅ 所有现有测试通过
-- ✅ 无需修改现有技能文件
+## [1.0.0] - 2026-07-31
 
-## 性能对比
-
-### 懒加载 vs 预加载
-
-| 指标 | 预加载模式 | 懒加载模式 | 改善 |
-|------|-----------|-----------|------|
-| 启动时间 (100 skills) | ~2000ms | ~0.4ms | ⬇️ 99.98% |
-| 内存占用 (100 skills) | ~250KB | ~50KB | ⬇️ 80% |
-| 热更新 | 需要重启 | 自动生效 | ✅ 零停机 |
-| 扩展性 | < 100 个 | 无限制 | ✅ 100x+ |
-
-### 实测数据
-
-```
-技能数量    | 扫描耗时    | 首次调用   | 二次调用
------------|------------|------------|-----------
-10 个      | 50ms       | 0ms        | 0ms
-30 个      | 160ms      | 0ms        | 0ms
-50 个      | 164ms      | 0ms        | 0ms
-100 个     | 436ms      | 0ms        | 0ms
-```
-
-## 使用示例
-
-### 基本使用（与之前相同）
-
-```python
-from auditronclaw.core.skill_loader import load_dynamic_skills
-
-# 自动使用懒加载
-tools = load_dynamic_skills()
-```
-
-### 高级使用
-
-```python
-from auditronclaw.core.skill_loader import (
-    load_dynamic_skills,
-    reload_skills,
-    get_skill_count,
-    clear_skill_cache
-)
-
-# 获取技能数量
-count = get_skill_count()
-
-# 新增技能后重新扫描
-new_tools = reload_skills()
-
-# 修改技能内容后清除缓存
-clear_skill_cache()
-```
-
-## 技术细节
-
-### 核心组件
-
-```
-LazySkillLoader
-├── _scan_skills()              # 扫描技能目录
-├── _extract_metadata()          # 提取 name/description
-├── _load_skill_content()        # 加载完整内容（带缓存）
-├── _create_lazy_tool()         # 创建懒加载工具
-├── get_all_tools()             # 获取所有工具
-├── get_tool_count()           # 获取技能数量
-└── clear_cache()              # 清除缓存
-```
-
-### 缓存策略
-
-1. **元数据缓存**（60秒）- 缓存扫描结果
-2. **内容缓存**（LRU，最大50个）- 缓存技能内容
-3. **文件修改时间检测** - 自动失效缓存
-
-## 测试覆盖
-
-### 单元测试
-
-- ✅ 基本懒加载功能
-- ✅ 强制重新扫描
-- ✅ 缓存清除
-- ✅ 向后兼容性
-
-### 性能测试
-
-- ✅ 不同规模技能数量测试（10/30/50/100）
-- ✅ 扫描性能
-- ✅ 首次调用性能
-- ✅ 缓存命中性能
-
-## 未来计划
-
-### 中期（规划中）
-
-- [ ] 技能预热机制
-- [ ] 缓存持久化
-- [ ] 依赖管理
-
-### 长期（探索中）
-
-- [ ] 分布式缓存
-- [ ] 技能版本控制
-- [ ] 使用统计和分析
-
-## 贡献者
-
-- @AI Assistant - 实现懒加载机制
+上游 CyberClaw 基线版本。包含：LangGraph agent 核心、两段式技能调用（help → run）、懒加载技能加载器（启动仅扫元数据、首调才加载全文、LRU 缓存、支持热更新）、双水位记忆、心跳任务引擎、JSONL 审计日志与监控终端。
