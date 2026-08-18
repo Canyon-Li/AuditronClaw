@@ -13,7 +13,7 @@ Golden 能力基准 runner(阶段 4):正常任务干成了没。
     - 失败分类:miss_tool(没调该调的)/ bad_result(调了但结果错)/
       over_refusal(安全假阳性:拒绝合法任务——golden 独有产出)
     - temperature=0;单次运行;LLM 非确定性在协议中声明
-    - 隔离/执行/落盘底座在 harness.py(与注入基准共享)
+    - 隔离/执行/落盘流水线在 bench_pipeline.py(与注入基准共享)
 """
 
 import argparse
@@ -25,7 +25,7 @@ from pathlib import Path
 
 import yaml
 
-from harness import run_case, write_results
+from bench_pipeline import run_case, write_results
 
 CASES_FILE = Path(__file__).resolve().parent / "cases" / "golden_cases.yaml"
 
