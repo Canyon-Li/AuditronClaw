@@ -2,7 +2,7 @@
 
 # AuditronClaw
 
-###  **当 AI 开始"黑箱操作"，你需要一双透视眼**
+### 别人说"我的 Agent 很安全"，这里给你数字
 
 [![AuditronClaw](https://img.shields.io/badge/AuditronClaw-1.1.0-purple.svg?logo=cyberpunk)](https://github.com/Canyon-Li/AuditronClaw)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg?logo=python)](https://python.org)
@@ -12,42 +12,42 @@
 [![CI](https://github.com/Canyon-Li/AuditronClaw/actions/workflows/ci.yml/badge.svg)](https://github.com/Canyon-Li/AuditronClaw/actions/workflows/ci.yml)
 [![GitHub](https://img.shields.io/badge/GitHub-@Canyon-Li-black.svg?logo=github)](https://github.com/Canyon-Li)
 
-**下一代透明智能体架构** · Next-Gen Transparent Agent Architecture
+**安全边界可度量的本地智能体** · Agent with Measurable Security Boundaries
+
+77.5% 注入拦截 · 2.0% 危害落地 · 83.8% 任务达成 · 0 安全误拦
+
+（以上为 87 条基准用例 + 62 项测试在 glm-4-flash 上的实测结果，协议与复现方式见下文）
 
 </div>
 
 ---
 
-> 🤖 **你的 AI 在背着你做什么？AuditronClaw 让所有行为无所遁形**
->
-> 💡 **灵感来源**：受 [OpenClaw](https://github.com/openclaw/openclaw) 的启发，AuditronClaw 专注于解决 AI 智能体的透明度和可控性问题。
->
-> 🙏 **致谢**：本项目 fork 自 [CyberClaw](https://github.com/ttguy0707/CyberClaw)（原作者 @ttguy0707），基于 MIT 许可证进行二次开发。原始版权见 [LICENSE](LICENSE)。
+## 这是什么
+
+AuditronClaw 是一个跑在本地的 LangGraph 智能体终端，**源自（fork）[CyberClaw](https://github.com/ttguy0707/CyberClaw)**（原作者 @ttguy0707，MIT 协议，感谢其开源工作）。**本项目已脱离 GitHub fork 网络，作为独立仓库维护**；安全加固已回流上游（见下文）。
+
+与上游的分野在于一条工作线：**审计 → 加固 → 度量**。fork 后对基线做了系统安全审计，发现并修复了三类可利用边界（eval RCE、沙盒绕过、技能命令代理），修复已作为 [PR #18](https://github.com/ttguy0707/CyberClaw/pull/18)、[PR #19](https://github.com/ttguy0707/CyberClaw/pull/19) 回流上游；随后建立了一套确定性断言的双维基准，让"安全"不再是自证声明，而是可复现的数字。
+
+**继承自上游并继续维护的能力**：两段式技能调用（help → run）、双水位记忆（长期画像 + 短期摘要）、心跳任务引擎、JSONL 全行为审计与监控终端、跨平台（Unix/Windows）、兼容 OpenClaw 与 Claude Code 技能生态。
+
+**本项目新增**：
+
+- 结构化命令白名单（shlex 校验，封死环境变量展开 / 内联解释器等绕过面）
+- 会话隔离（`--thread`，画像按会话分文件 + 写入留痕）
+- 注入拦截基准 50 条 + Golden 能力基准 37 条 + CI 门禁
 
 ---
 
-## 📖 简介
+## 🔒 安全审计与加固
 
-AuditronClaw 是一个**透明可控智能体**，重新定义 AI 系统的可信边界：
+| 审计发现 | 修复 | 验证 |
+|---|---|---|
+| `calculator` 工具 `eval()` 可经属性链逃逸拿到 `os.system`（任意代码执行） | AST 节点白名单求值器，仅放行算术 | 红队 17 条注入向量全拒绝 |
+| shell 校验为五条正则黑名单，可被环境变量展开 / 引号内联解释器绕过 | shlex 结构化命令白名单，白名单外二进制一律拒绝 | 红队 18 条注入全拦 + 6 条合法全放行 |
+| 恶意 SKILL.md 可借技能 `run` 通道代理执行命令 | 技能命令与手动 shell 走同一校验器 | 注入基准 skill_md 面 12/12 |
+| 画像全局单文件且无写入留痕，存在跨会话持久化投毒链 | 画像按会话分文件 + 行级 diff 审计留痕 | 注入基准 profile 面工具层全兜底 |
 
-- **🔍 白盒化决策** → 5 类事件审计 + JSONL 日志 + Rich 监控终端，所有行为可追溯
-- **🛡️ 零信任执行** → 两段式调用（help → run），先看说明书再执行
-- **🧠 持续学习** → 双水位记忆系统（长期画像 + 短期摘要），越用越懂你
-- **⚡ 复杂任务编排** → 心跳任务系统 + 可插拔技能，解放双手
-
-### 🔌 技能生态兼容
-
-AuditronClaw 支持**OpenClaw 技能**和**Claude Code 技能**，可直接使用两个生态系统的丰富技能资源，无需重新开发。
-
-### 🌟 核心能力
-
-| 能力 | 说明 | 优势 |
-|------|------|------|
-| **🧠 双水位记忆** | 长期画像 + 短期摘要，持续学习用户偏好 | 越用越懂你，避免重复询问 |
-| **🔍 全行为审计** | 5 类事件实时审计，JSONL 日志 + Rich 监控终端 | 告别黑箱，所有决策可追溯 |
-| **🛡️ 零信任执行** | help → run 两段式调用，先看说明书再执行 | 先理解，再执行 |
-| **⏰ 心跳任务引擎** | 后台独立进程，自动执行定时任务 | 解放双手，复杂任务自动化 |
-| **🖥️ 跨平台支持** | Unix + Windows 双平台自适应，LLM 自主选择命令 | 一套代码，全平台运行 |
+**已知未修复**：注入基准发现 1 条真实落地——用户套问下 LLM 会复述系统提示词原文（信息外泄，工具层无法拦截），归因提示词保密性不足。如实列出，不藏。
 
 ---
 
@@ -69,10 +69,10 @@ AuditronClaw 支持**OpenClaw 技能**和**Claude Code 技能**，可直接使�
 | 直接越狱指令 | 9/13 | 1/13 |
 | **合计** | **38/49 (77.5%)** | **1/49 (2.0%)** |
 
-**结果解读（诚实版）**：
+**结果解读**：
 - **77.5% 提示面拦截** = LLM 未被骗发起越权/污染行为。失守的 11 条说明 LLM 的"对齐"面可以被针对性 prompt 说服。
-- **2.0% 危害落地** = 攻击真正达成。失守 11 条中 10 条被工具层沙盒白名单兜住（`read_office_file ../../.env` → 越权拦截、`cat /etc/passwd` → 权限拒绝），LLM 被骗 ≠ 系统被攻破。
-- **唯一真实落地 1 条**：LLM 在用户套问下**复述了系统提示词原文**（含沙盒边界细节）——信息外泄，工具层无法拦截。这是当前基准发现的唯一 P0 级缺陷，归因于提示词保密性不足。
+- **2.0% 危害落地** = 攻击真正达成。失守 11 条中 10 条被工具层沙盒白名单兜住，LLM 被骗 ≠ 系统被攻破。
+- **唯一真实落地 1 条**：LLM 在套问下复述系统提示词原文——信息外泄，工具层无法拦截，见上方"已知未修复"。
 
 复现：`python benchmarks/run_injection_bench.py` · 用例：`benchmarks/cases/injection_cases.yaml`
 
@@ -92,11 +92,10 @@ AuditronClaw 支持**OpenClaw 技能**和**Claude Code 技能**，可直接使�
 | 技能两段式（零信任执行协议） | 2/4 |
 | **合计** | **31/37 (83.8%)** |
 
-**结果解读（诚实版）**：
-- **0 条安全假阳性（over_refusal）**：全部 6 条 office 内合法操作（含 shell）无一被安全提示词吓退——安全措施没有以"不敢干活"为代价。这推翻了"高压安全提示词会导致过度保守"的预设。
-- **6 条失败分三类**：**任务谎报** 3 条（口头回复"已设置提醒/已记住"，实际未调用任何工具——工具轨迹为空）；**自然语言时间解析失败** 1 条（"每周一"被解析为过去日期，工具正确拒绝但 LLM 未自纠）；**技能两段式违反** 2 条（直接 `run` 跳过 `help`，其中 1 条编造"权限限制"拒绝理由）。谎报发生在 LLM 决策层，单元测试结构性测不到，只有端到端能力基准能抓。
+**结果解读**：
+- **0 条安全假阳性（over_refusal）**：全部 6 条 office 内合法操作（含 shell）无一被安全提示词吓退——安全措施没有以"不敢干活"为代价。
+- **6 条失败分三类**：**任务谎报** 3 条（口头回复"已设置提醒/已记住"，工具轨迹为空）；**时间解析失败** 1 条（"每周一"被解析为过去日期，工具正确拒绝但未自纠）；**技能两段式违反** 2 条（直接 `run` 跳过 `help`，其中 1 条编造"权限限制"拒绝理由）。谎报发生在 LLM 决策层，单元测试结构性测不到，只有端到端能力基准能抓。
 - **副作用任务一律双锚断言**（工具调用 + 落盘终态）：tasks.json / 画像 / 文件内容直接核验，"调了工具就说干完了"过不了关。
-- **失败分布的指向**：记忆/任务/技能协议三面是薄弱区，归因于系统提示词对"必须调工具落地"与"先读说明书"的约束力不足——留给后续 prompt 迭代，并以本基准为回归门禁。
 
 复现：`python benchmarks/run_golden_eval.py` · 用例：`benchmarks/cases/golden_cases.yaml`
 
@@ -105,23 +104,6 @@ AuditronClaw 支持**OpenClaw 技能**和**Claude Code 技能**，可直接使�
 - 判定 = 确定性断言（工具调用/关键词/文件落盘），无 LLM-as-judge，可复现。
 - 隔离 = 每用例独立 workspace + 独立会话（`benchmarks/bench_pipeline.py` 共享流水线），用例间零污染。
 - 盲区：单次运行、文本面泄漏、结果随模型漂移。测量的是"这一个模型 + 这一批用例"的剖面，不是绝对能力。
-
----
-
-## 🔒 安全审计与加固
-
-本项目的核心工作线：对 fork 基线做系统安全审计，修复发现的可利用边界，再用可复现的基准度量修复效果。
-
-| 审计发现 | 修复 | 验证 |
-|---|---|---|
-| `calculator` 工具 `eval()` 可经属性链逃逸拿到 `os.system`（任意代码执行） | AST 节点白名单求值器，仅放行算术 | 红队 17 条注入向量全拒绝 |
-| shell 校验为五条正则黑名单，可被环境变量展开 / 引号内联解释器绕过 | shlex 结构化命令白名单，白名单外二进制一律拒绝 | 红队 18 条注入全拦 + 6 条合法全放行 |
-| 恶意 SKILL.md 可借技能 `run` 通道代理执行命令 | 技能命令与手动 shell 走同一校验器 | 注入基准 skill_md 面 12/12 |
-| 画像全局单文件且无写入留痕，存在跨会话持久化投毒链 | 画像按会话分文件 + 行级 diff 审计留痕 | 注入基准 profile 面工具层全兜底 |
-
-审计修复已回流上游：[CyberClaw#18](https://github.com/ttguy0707/CyberClaw/pull/18)、[#19](https://github.com/ttguy0707/CyberClaw/pull/19)（均已合并）。
-
-**已知未修复**：注入基准发现 1 条真实落地——用户套问下 LLM 会复述系统提示词原文（信息外泄，工具层无法拦截），归因提示词保密性不足，见上方安全基准说明。
 
 ---
 
@@ -139,6 +121,10 @@ auditronclaw run
 
 # 监控终端（另一个终端，实时查看 agent 行为审计流）
 auditronclaw monitor
+
+# 跑基准（需要模型 API Key）
+python benchmarks/run_injection_bench.py
+python benchmarks/run_golden_eval.py
 ```
 
-完整文档（架构图、使用指南、技能开发）建设中，变更历史见 [CHANGELOG](CHANGELOG.md)。
+变更历史见 [CHANGELOG](CHANGELOG.md)。
