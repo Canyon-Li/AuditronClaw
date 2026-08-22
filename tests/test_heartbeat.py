@@ -45,7 +45,8 @@ class TestHeartbeatPacemaker(unittest.TestCase):
         """测试任务文件不存在时的行为"""
         from auditronclaw.core.heartbeat import pacemaker_loop
         
-        # 删除临时文件模拟不存在
+        # 删除临时文件模拟不存在(先关句柄:Windows 不允许删除打开中的文件)
+        self.temp_file.close()
         os.unlink(self.temp_file.name)
         
         # 运行一个周期（不等待实际间隔）
