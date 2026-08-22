@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch, mock_open
 import os
+import platform
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -130,16 +131,25 @@ class TestOfficePathBaseUnification(unittest.TestCase):
             _get_safe_path("office/config/app.ini"),
             os.path.abspath(os.path.join(OFFICE_DIR, "config/app.ini")),
         )
-        # 仅 "office" 本身 → office 根；反斜杠形态同样剥除
+        # 仅 "office" 本身 → office 根
         self.assertEqual(_get_safe_path("office"), os.path.abspath(OFFICE_DIR))
+        # 平台语义（CI 实弹教训：本地 Windows 绿 ≠ Linux 绿）：
+        # Windows 反斜杠等价分隔符、大小写不敏感 → 剥除；
+        # Linux 反斜杠与大写 Office 是合法文件名字符 → 保持原样（不做静默重定向）
+        is_win = platform.system() == "Windows"
         self.assertEqual(
             _get_safe_path("office\\config\\app.ini"),
-            os.path.abspath(os.path.join(OFFICE_DIR, "config/app.ini")),
+            os.path.abspath(os.path.join(
+                OFFICE_DIR,
+                "config/app.ini" if is_win else "office\\config\\app.ini",
+            )),
         )
-        # Windows 大小写不敏感
         self.assertEqual(
             _get_safe_path("Office/config/app.ini"),
-            os.path.abspath(os.path.join(OFFICE_DIR, "config/app.ini")),
+            os.path.abspath(os.path.join(
+                OFFICE_DIR,
+                "config/app.ini" if is_win else "Office/config/app.ini",
+            )),
         )
 
     def test_get_safe_path_without_prefix_unchanged(self):
@@ -153,8 +163,14 @@ class TestOfficePathBaseUnification(unittest.TestCase):
         """剥前缀不得打开越界口子："office/../.." 类路径仍被拦"""
         with self.assertRaises(PermissionError):
             _get_safe_path("office/../../etc/passwd")
-        with self.assertRaises(PermissionError):
-            _get_safe_path("office\\..\\..\\forbidden.txt")
+        # 反斜杠越界形态仅 Windows 视为分隔符；Linux 下它是 office 内的
+        # 字面文件名，不构成越界（钉住"不做静默重定向"的平台语义）
+        if platform.system() == "Windows":
+            with self.assertRaises(PermissionError):
+                _get_safe_path("office\\..\\..\\forbidden.txt")
+        else:
+            self.assertTrue(_get_safe_path("office\\..\\..\\forbidden.txt")
+                            .startswith(os.path.abspath(OFFICE_DIR)))
 
     def test_write_no_silent_double_write_e2e(self):
         """端到端复现：带前缀与不带前缀写入必须落同一物理文件"""
@@ -193,11 +209,18 @@ class TestShellOfficePrefixGuard(unittest.TestCase):
     """
 
     def test_shell_office_prefixed_arg_rejected_with_guidance(self):
-        for cmd in (
+        # 反斜杠前缀仅 Windows 触发守卫；Linux 下它是字面文件名参数，
+        # 不构成冗余前缀（走到执行层，由"文件不存在"自然反馈）
+        cmds = [
             "cat office/logs/error.log",
-            "type office\\logs\\error.log",
             "grep -c ERROR office/logs/error.log",
-        ):
+        ]
+        if platform.system() == "Windows":
+            cmds.append("type office\\logs\\error.log")
+        else:
+            result = execute_office_shell.invoke({"command": "type office\\logs\\error.log"})
+            self.assertNotIn("office 根", result)
+        for cmd in cmds:
             with self.subTest(cmd=cmd):
                 result = execute_office_shell.invoke({"command": cmd})
                 self.assertIn("❌ 权限拒绝", result)
