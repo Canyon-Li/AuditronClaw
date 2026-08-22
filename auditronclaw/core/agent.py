@@ -80,7 +80,8 @@ def create_agent_app(
     model_name: str = "gpt-4o-mini",
     tools: Optional[List[BaseTool]] = None,
     checkpointer = None,
-    thread_id: str = "local_geek_master"
+    thread_id: str = "local_geek_master",
+    extra_tools: Optional[List[BaseTool]] = None
 ):
     if tools is None:
         dynamic_tools = load_dynamic_skills()
@@ -89,6 +90,13 @@ def create_agent_app(
         actual_tools = [profile_tool if t.name == "save_user_profile" else t for t in BUILTIN_TOOLS] + dynamic_tools
     else:
         actual_tools = tools
+
+    # 外接工具按个追加(ADR-001):内置全保留;同名时外接覆盖内置,且只保留一个。
+    # 注意外接工具不经过命令白名单与路径防护(仅调用被审计),注入者自担安全责任。
+    if extra_tools:
+        extra_by_name = {t.name: t for t in extra_tools}
+        actual_tools = [extra_by_name.pop(t.name, t) for t in actual_tools]
+        actual_tools.extend(extra_by_name.values())
     
     
     tool_node = ToolNode(actual_tools)
