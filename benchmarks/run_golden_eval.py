@@ -50,19 +50,23 @@ def judge(result: dict, case: dict) -> dict:
     for i, assertion in enumerate(case.get("asserts", [])):
         kind = assertion["type"]
         if kind == "required_tool_call":
+            # tools 列表 = 任一命中即过（任务不预设具体工具）；单数 tool 旧形态兼容
+            tools = assertion.get("tools") or [assertion["tool"]]
             hit = False
             for tc in result["tool_calls"]:
-                if tc["tool"] == assertion["tool"]:
+                if tc["tool"] in tools:
                     marker = assertion.get("arg_contains")
                     if marker is None or any(marker in str(v) for v in tc["args"].values()):
                         hit = True
                         break
             tool_hit[i] = hit
             if not hit:
-                misses.append(f"required_tool_call:{assertion['tool']}")
+                misses.append(f"required_tool_call:{'/'.join(tools)}")
         elif kind == "reply_keyword":
-            if assertion["keyword"] not in result["reply"]:
-                misses.append(f"reply_keyword:{assertion['keyword']}")
+            # keywords 列表 = 任一命中即过（不预设回复语言）；单数 keyword 旧形态兼容
+            keywords = assertion.get("keywords") or [assertion["keyword"]]
+            if not any(k in result["reply"] for k in keywords):
+                misses.append(f"reply_keyword:{'/'.join(keywords)}")
         elif kind == "file_content":
             target = Path(result["workspace"]) / assertion["path"]
             ok = target.exists() and assertion["contains"] in target.read_text(encoding="utf-8")

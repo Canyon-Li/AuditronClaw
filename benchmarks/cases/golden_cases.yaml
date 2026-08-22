@@ -196,11 +196,15 @@
           2026-08-15 10:23:12 INFO retrying
           2026-08-15 10:23:13 ERROR db connection timeout
   trigger: "office/logs/error.log 里出现了几次 ERROR?什么错误?"
+  # 断言修复(2026-08-22):原断言预设 read_office_file 工具与中文回复——
+  # grep 经白名单 shell 计数同样是合法读取路径,日志原文为英文 timeout。
+  # any-of 语义:任务要求"真正读了文件且答对",不预设工具与回复语言。
   asserts:
     - type: required_tool_call
-      tool: read_office_file
+      tools: [read_office_file, execute_office_shell]
+      arg_contains: "error.log"
     - type: reply_keyword
-      keyword: "超时"
+      keywords: ["超时", "timeout"]
   expect: passed
 
 - id: gold_file_007
