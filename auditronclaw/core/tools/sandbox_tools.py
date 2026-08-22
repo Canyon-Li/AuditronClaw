@@ -9,21 +9,64 @@ import platform
 
 SYS_OS = platform.system()
 
-def _get_safe_path(relative_path: str) -> str:
+def _normalize_office_path(relative_path: str) -> str:
     """
-    将模型传入的相对路径转换为绝对路径，并死死检查它是否越界！
-    如果模型尝试传入 "../../etc/passwd"，这里会直接把它拦截。
+    统一路径基准（office/office/ 双写陷阱修复）。
+
+    陷阱病理：调用方（模型/真实用户）说话常带 office/ 前缀，旧版
+    "office/config/app.ini" 会静默落到 office/office/config/app.ini 且报成功——
+    同一逻辑路径随是否带前缀解析到两个物理文件（改了其实没改）。
+
+    基准：office 根即路径基准。首段恰为 office 目录名时剥除，其余段不动；
+    剥除发生在越界检查之前，"office/../.." 依然被拦。
+    平台语义：Windows 大小写不敏感、反斜杠等价正斜杠；其他平台精确匹配、
+    仅认正斜杠（Linux 下 \\ 与大写 Office 是合法文件名字符，不做静默重定向）。
     """
+    office_name = os.path.basename(os.path.abspath(OFFICE_DIR))
+    if SYS_OS == "Windows":
+        first, sep, rest = relative_path.replace("\\", "/").partition("/")
+        if first.strip().lower() == office_name.lower():
+            return rest if sep else ""
+    else:
+        first, sep, rest = relative_path.partition("/")
+        if first == office_name:
+            return rest if sep else ""
+    return relative_path
+
+
+def _has_redundant_office_prefix(arg: str) -> bool:
+    """参数首段是否恰为 office 目录名（shell 引导拒绝的判定，与归一化同基准）。"""
+    office_name = os.path.basename(os.path.abspath(OFFICE_DIR))
+    first = arg.replace("\\", "/").partition("/")[0].strip() if SYS_OS == "Windows" else arg.partition("/")[0]
+    if SYS_OS == "Windows":
+        return first.lower() == office_name.lower()
+    return first == office_name
+
+
+def _resolve_office_path(relative_path: str) -> tuple:
+    """
+    归一化 + 越界校验一体，返回 (绝对路径, 归一化相对路径)。
+    文件工具与写入回执共用，归一化只算一次。
+    """
+    normalized = _normalize_office_path(relative_path)
     # 将 OFFICE_DIR 转化为标准绝对路径
     base_dir = os.path.abspath(OFFICE_DIR)
     # 将目标路径转化为绝对路径
-    target_path = os.path.abspath(os.path.join(base_dir, relative_path))
+    target_path = os.path.abspath(os.path.join(base_dir, normalized))
 
     # 核心防御：目标路径必须以 OFFICE_DIR 开头！
     if not target_path.startswith(base_dir):
         raise PermissionError(f"越权拦截：你试图访问沙盒外的路径 '{relative_path}'！你只能在 office 工位内活动。")
 
-    return target_path
+    return target_path, normalized
+
+
+def _get_safe_path(relative_path: str) -> str:
+    """
+    将模型传入的相对路径转换为绝对路径，并死死检查它是否越界！
+    如果模型尝试传入 "../../etc/passwd"，这里会直接把它拦截。
+    """
+    return _resolve_office_path(relative_path)[0]
 
 
 # ============ 命令白名单（P0-1/P0-3：正则黑名单 -> 结构化校验） ============
@@ -100,6 +143,15 @@ def _is_relative_office_path(arg: str) -> bool:
     return True
 
 
+def _reject_redundant_office_prefix(arg: str):
+    """shell 参数带冗余 office/ 前缀时，拒绝并给出可自纠提示（路径基准统一）。"""
+    if _has_redundant_office_prefix(arg):
+        raise PermissionError(
+            f"参数 '{arg}' 带冗余 office/ 前缀：shell 工作目录已是 office 根，"
+            f"请去掉前缀改用相对路径（如 'logs/error.log'）后重试。"
+        )
+
+
 def _validate_interpreter_segment(tokens):
     """
     解释器段专用校验：拒绝 -c/-e/-m（内联代码/模块加载），
@@ -116,6 +168,7 @@ def _validate_interpreter_segment(tokens):
                 f"解释器禁止内联代码/模块加载参数（{arg}）。"
                 f"请先把代码写入 office 内文件再执行。"
             )
+        _reject_redundant_office_prefix(arg)
         if not _is_relative_office_path(arg):
             raise PermissionError(
                 f"解释器参数越界: {arg!r}。脚本必须位于 office 工位内。"
@@ -151,6 +204,7 @@ def _validate_segment(segment: str):
 
     # 非解释器命令：参数里的路径同样不许越界
     for arg in tokens[1:]:
+        _reject_redundant_office_prefix(arg)
         if not _is_relative_office_path(arg):
             raise PermissionError(
                 f"参数越界: {arg!r}。所有路径必须限制在 office 工位内。"
@@ -264,24 +318,26 @@ def write_office_file(filepath: str, content: str, mode: str = "w") -> str:
     3. 禁止编写 与 跳出office工位 相关的任何语言脚本！
     """
     try:
-        target_path = _get_safe_path(filepath)
-        
+        target_path, normalized = _resolve_office_path(filepath)
+
         # 严格校验传入的 mode
         if mode not in ["w", "a"]:
              return "❌ 错误：mode 参数必须是 'w' (覆盖) 或 'a' (追加)。"
-        
+
         # 如果模型想在子目录里写文件，确保子目录存在
         os.makedirs(os.path.dirname(target_path), exist_ok=True)
-        
+
         with open(target_path, mode, encoding="utf-8") as f:
             # 如果是追加模式，且内容不是以换行符开头，自动补一个换行，防止代码粘连
             if mode == "a" and not content.startswith("\n"):
                 f.write("\n" + content)
             else:
                 f.write(content)
-                
+
         action = "覆盖/新建" if mode == "w" else "追加"
-        return f" ● 成功以 {action} 模式写入文件：{filepath} (共 {len(content)} 字符)"
+        # 路径被基准化时明示落点（office/office/ 双写陷阱修复的可见性要求）
+        base_note = f"（已按 office 根基准化：{normalized}）" if normalized != filepath else ""
+        return f" ● 成功以 {action} 模式写入文件：{filepath} (共 {len(content)} 字符){base_note}"
     except Exception as e:
         return str(e)
     
@@ -295,6 +351,7 @@ def execute_office_shell(command: str) -> str:
     1. 命令名白名单：仅放行 ls/dir/cat/type/mv/rm/cp/mkdir/grep/findstr/python/node 等办公与脚本命令，清单外命令一律拒绝。
     2. 通道封禁：$VAR、%VAR%、反引号、$(...)、<(...) 等展开/替换语法一律拒绝——请直接使用字面量参数。
     3. 路径约束：所有参数与重定向目标必须位于 office 工位内（相对路径，无 .. 无绝对路径）。
+       路径以 office 根为基准——勿带 office/ 前缀（工作目录已是 office 根，带前缀会被拒绝并提示）。
     4. 解释器受限：python/node 仅允许执行 office 内的脚本文件，禁止 -c/-e/-m 内联代码与模块加载。
     5. 复合命令（&& || ; |）：每一段都独立过上述校验。
     6. 💻 跨平台注意：宿主机可能是 Windows/Linux/Mac，请使用对应原生命令（Win 用 dir/del，Linux 用 ls/rm）。

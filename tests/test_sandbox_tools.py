@@ -115,5 +115,100 @@ class TestSandboxTools(unittest.TestCase):
                 self.assertIn("❌ 权限拒绝", result)
 
 
+class TestOfficePathBaseUnification(unittest.TestCase):
+    """office/office/ 双写陷阱回归：统一路径基准。
+
+    陷阱病理：write_office_file 收到 "office/config/app.ini" 会静默落到
+    office/office/config/app.ini 并返回成功——同一逻辑路径随调用方是否带
+    office/ 前缀解析到两个物理文件（改了其实没改）。修复基准：office 根
+    即路径基准，冗余首段 "office/" 剥除，"office/x" 与 "x" 必须同文件。
+    """
+
+    def test_get_safe_path_strips_redundant_office_prefix(self):
+        """冗余 office/ 前缀归一到 office 根基准"""
+        self.assertEqual(
+            _get_safe_path("office/config/app.ini"),
+            os.path.abspath(os.path.join(OFFICE_DIR, "config/app.ini")),
+        )
+        # 仅 "office" 本身 → office 根；反斜杠形态同样剥除
+        self.assertEqual(_get_safe_path("office"), os.path.abspath(OFFICE_DIR))
+        self.assertEqual(
+            _get_safe_path("office\\config\\app.ini"),
+            os.path.abspath(os.path.join(OFFICE_DIR, "config/app.ini")),
+        )
+        # Windows 大小写不敏感
+        self.assertEqual(
+            _get_safe_path("Office/config/app.ini"),
+            os.path.abspath(os.path.join(OFFICE_DIR, "config/app.ini")),
+        )
+
+    def test_get_safe_path_without_prefix_unchanged(self):
+        """无前缀路径不受归一化影响"""
+        self.assertEqual(
+            _get_safe_path("config/app.ini"),
+            os.path.abspath(os.path.join(OFFICE_DIR, "config/app.ini")),
+        )
+
+    def test_traversal_still_blocked_after_normalization(self):
+        """剥前缀不得打开越界口子："office/../.." 类路径仍被拦"""
+        with self.assertRaises(PermissionError):
+            _get_safe_path("office/../../etc/passwd")
+        with self.assertRaises(PermissionError):
+            _get_safe_path("office\\..\\..\\forbidden.txt")
+
+    def test_write_no_silent_double_write_e2e(self):
+        """端到端复现：带前缀与不带前缀写入必须落同一物理文件"""
+        probe = "_dbl_write_probe.txt"
+        probe_path = os.path.join(OFFICE_DIR, probe)
+        nested_path = os.path.join(OFFICE_DIR, "office", probe)
+
+        def _cleanup():
+            for p in (probe_path, nested_path):
+                if os.path.exists(p):
+                    os.remove(p)
+            nested_dir = os.path.join(OFFICE_DIR, "office")
+            if os.path.isdir(nested_dir) and not os.listdir(nested_dir):
+                os.rmdir(nested_dir)
+
+        # 前置清残骸（红测试历史遗留），保证断言不受文件系统历史影响
+        _cleanup()
+        self.addCleanup(_cleanup)
+        # 带前缀写 v1，不带前缀覆盖 v2
+        write_office_file.invoke({"filepath": f"office/{probe}", "content": "v1"})
+        write_office_file.invoke({"filepath": probe, "content": "v2", "mode": "w"})
+        # 不允许出现 office/office/ 双层目录
+        self.assertFalse(os.path.exists(os.path.join(OFFICE_DIR, "office", probe)))
+        # 两种读法必须读到同一文件（v2）
+        self.assertEqual(read_office_file.invoke({"filepath": probe}), "v2")
+        self.assertEqual(read_office_file.invoke({"filepath": f"office/{probe}"}), "v2")
+
+
+class TestShellOfficePrefixGuard(unittest.TestCase):
+    """路径基准统一的 shell 侧闭合（gold_file_006 回归）。
+
+    病理：触发语/用户说话常带 office/ 前缀，文件工具已归一化，但模型把
+    前缀原样塞进 shell 命令时（cwd 已是 office 根）会拼出 office/office/…
+    找不到文件，模型连撞三次后放弃。守卫：shell 参数带 office/ 前缀时
+    拒绝并给出可自纠提示（去掉前缀重试），静默分歧变引导式纠正。
+    """
+
+    def test_shell_office_prefixed_arg_rejected_with_guidance(self):
+        for cmd in (
+            "cat office/logs/error.log",
+            "type office\\logs\\error.log",
+            "grep -c ERROR office/logs/error.log",
+        ):
+            with self.subTest(cmd=cmd):
+                result = execute_office_shell.invoke({"command": cmd})
+                self.assertIn("❌ 权限拒绝", result)
+                self.assertIn("office 根", result)
+
+    def test_shell_plain_relative_arg_not_caught_by_guard(self):
+        """无前缀相对路径不受守卫影响（走到执行层，不因本守卫拒绝）"""
+        result = execute_office_shell.invoke({"command": "cat logs/nonexistent.log"})
+        self.assertNotIn("冗余 office", result)
+        self.assertNotIn("office 根", result)
+
+
 if __name__ == '__main__':
     unittest.main()
