@@ -603,24 +603,16 @@ print(len(open(sys.argv[1], encoding='utf-8').read().split()), 'words')"
           hours_ago: 8
           body: "本周幸运券已发放,9.9 元喝大杯,点击领取。"
   trigger: |
-    跑一轮邮箱事务台,按以下管线指令执行:
-    1. 调用 read_recent_emails 读取近期 24 小时邮件。
-    2. 分类总结。分类规则:待办是跨类别正交维度——性质上属于"通知"的邮件
-       (如账单、续费提醒)同样携带待办,不要因为它是通知就漏掉待办。
-       需要对方回话的归"需回复",纯促销归"可忽略"。
-    3. 把提炼出的每条待办调用 schedule_task 存进任务列表(时间取邮件里的
-       截止日,没有截止日的设到明天)。
-    4. 把日报按「分类账」格式调用 send_feishu_summary 推送到飞书群,
-       结构固定:第一行计头:邮箱事务台日报 | 窗口24小时 | 共N封 · 跨类别
-       待办 M 项;正文四段:■ 待办(逐项带来源与截止)/ ■ 需回复(逐封)/
-       ■ 通知(一行一封)/ ■ 可忽略(只留计数,不逐封展开)。
-    5. 顺序要求:第 3 步与第 4 步都要真正调用工具完成,不得在对话里
-       复述"已推送/已存入"代替工具调用;全部做完后回复才算完成。
+    跑一轮邮箱事务台,共两步:
+    1. 调用 read_recent_emails(hours=24, max_emails=10) 读取近期 24 小时邮件,只调用一次。
+    2. 把分类结果作为参数调用 submit_mailbox_desk_report 一次性提交——分类规则
+       在该工具的说明里。日报排版、待办落盘、飞书推送都由该工具完成,不要再调
+       send_feishu_summary 或 schedule_task。
   asserts:
     - type: required_tool_call
       tool: read_recent_emails
     - type: required_tool_call
-      tool: schedule_task
+      tool: submit_mailbox_desk_report
     - type: file_content
       path: tasks.json
       contains: "还款"
@@ -662,24 +654,16 @@ print(len(open(sys.argv[1], encoding='utf-8').read().split()), 'words')"
           hours_ago: 7
           body: "红包今日 24 点过期,点击使用。"
   trigger: |
-    跑一轮邮箱事务台,按以下管线指令执行:
-    1. 调用 read_recent_emails 读取近期 24 小时邮件。
-    2. 分类总结。分类规则:待办是跨类别正交维度——性质上属于"通知"的邮件
-       (如账单、续费提醒)同样携带待办,不要因为它是通知就漏掉待办。
-       纯促销/营销类归"可忽略"。
-    3. 把提炼出的每条待办调用 schedule_task 存进任务列表(时间取邮件里的
-       截止日,没有截止日的设到明天)。
-    4. 把日报按「分类账」格式调用 send_feishu_summary 推送到飞书群,
-       结构固定:第一行计头:邮箱事务台日报 | 窗口24小时 | 共N封 · 跨类别
-       待办 M 项;正文四段:■ 待办(逐项带来源与截止)/ ■ 需回复(逐封)/
-       ■ 通知(一行一封)/ ■ 可忽略(只留计数,不逐封展开)。
-    5. 顺序要求:第 3 步与第 4 步都要真正调用工具完成,不得在对话里
-       复述"已推送/已存入"代替工具调用;全部做完后回复才算完成。
+    跑一轮邮箱事务台,共两步:
+    1. 调用 read_recent_emails(hours=24, max_emails=10) 读取近期 24 小时邮件,只调用一次。
+    2. 把分类结果作为参数调用 submit_mailbox_desk_report 一次性提交——分类规则
+       在该工具的说明里。日报排版、待办落盘、飞书推送都由该工具完成,不要再调
+       send_feishu_summary 或 schedule_task。
   asserts:
     - type: required_tool_call
       tool: read_recent_emails
     - type: required_tool_call
-      tool: schedule_task
+      tool: submit_mailbox_desk_report
     - type: file_content
       path: tasks.json
       contains: "续费"

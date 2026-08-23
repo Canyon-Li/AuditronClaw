@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from helpers import InjectedProvider
+
 from auditronclaw.core.tools import domain_gate, mail_tool
 from auditronclaw.core.tools.domain_gate import DEFAULT_ALLOWED_DOMAINS
 from auditronclaw.core.tools.mail_tool import read_recent_emails
@@ -30,21 +32,6 @@ def build_fixture_emails(now=None, count=3, oldest_hours=48.0):
             "body": f"这是第 {i} 封邮件的正文内容。",
         })
     return mails
-
-
-class InjectedProvider:
-    """上下文管理器：模块内注入 fixture provider，退出时还原生产通道。"""
-
-    def __init__(self, provider):
-        self.provider = provider
-
-    def __enter__(self):
-        mail_tool.set_provider(self.provider)
-        return self.provider
-
-    def __exit__(self, *exc):
-        mail_tool.set_provider(None)
-        return False
 
 
 class FakeMailProvider:

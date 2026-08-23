@@ -11,40 +11,12 @@ from urllib.error import URLError
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from helpers import FakeSender, InjectedProvider, InjectedSender
+
 from auditronclaw.core.tools import feishu_tool, mail_tool
 from auditronclaw.core.tools.feishu_tool import send_feishu_summary
 from auditronclaw.core.tools.mail_tool import read_recent_emails
 from auditronclaw.core.tools.builtins import schedule_task
-
-
-class InjectedProvider:
-    """上下文管理器:注入取信层 provider,退出时还原生产通道(与 test_mail_tools 同法)。"""
-
-    def __init__(self, provider):
-        self.provider = provider
-
-    def __enter__(self):
-        mail_tool.set_provider(self.provider)
-        return self.provider
-
-    def __exit__(self, *exc):
-        mail_tool.set_provider(None)
-        return False
-
-
-class InjectedSender:
-    """上下文管理器:注入推送层 sender,退出时还原生产通道(与 test_domain_gate_tools 同法)。"""
-
-    def __init__(self, sender):
-        self.sender = sender
-
-    def __enter__(self):
-        feishu_tool.set_sender(self.sender)
-        return self.sender
-
-    def __exit__(self, *exc):
-        feishu_tool.set_sender(None)
-        return False
 
 
 # ============ 事务台部署演练:推送失败路径(邮箱事务台部署接线)============
@@ -58,19 +30,9 @@ class InjectedSender:
 # 4. 占位凭据不落审计日志全文(部署纪律:凭据只存在宿主机 .env)。
 
 
-class FakeDeskSender:
-    """可切换成败/败的假发送器:捕获发送内容,零真实网络。"""
-
-    def __init__(self, fail=False):
-        self.sent = []
-        self.fail = fail
-
-    def __call__(self, webhook_url, payload):
-        if self.fail:
-            # 断网形态:URLError,消息里可能内嵌 URL
-            raise URLError(f"cannot reach {webhook_url}")
-        self.sent.append((webhook_url, payload))
-        return {"code": 0, "msg": "success"}
+def _broken_sender():
+    """断网形态的假发送器:URLError,消息里内嵌 URL(凭据泄露路径演练)。"""
+    return FakeSender(error=URLError("cannot reach the webhook url"))
 
 
 class TestDeskRoundPushFailureDrill(unittest.TestCase):
@@ -131,7 +93,7 @@ class TestDeskRoundPushFailureDrill(unittest.TestCase):
         self.assertIn("成功", scheduled)
 
         # ---- 第 3 步:推送失败(断网形态:URLError 消息内嵌 URL) ----
-        broken_sender = FakeDeskSender(fail=True)
+        broken_sender = _broken_sender()
         with InjectedSender(broken_sender), patch(
             "auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url",
             return_value=self.secret_url,
@@ -148,7 +110,7 @@ class TestDeskRoundPushFailureDrill(unittest.TestCase):
                             for t in tasks), "推送失败不得影响已落盘待办")
 
         # ---- 第 4 步:下一轮推送正常(网络恢复,失败不留污染状态) ----
-        healed_sender = FakeDeskSender()
+        healed_sender = FakeSender()
         with InjectedSender(healed_sender), patch(
             "auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url",
             return_value=self.secret_url,
@@ -161,7 +123,7 @@ class TestDeskRoundPushFailureDrill(unittest.TestCase):
 
     def test_push_failure_leaves_queryable_audit_and_no_credentials(self):
         """错误结构化可查:审计事件可检索;凭据(占位 URL)不落日志全文"""
-        broken_sender = FakeDeskSender(fail=True)
+        broken_sender = _broken_sender()
         with InjectedSender(broken_sender), patch(
             "auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url",
             return_value=self.secret_url,

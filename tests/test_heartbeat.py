@@ -280,9 +280,10 @@ class TestHeartbeatTaskQueue(unittest.TestCase):
 # 下个周期不重复触发。这是"手动改时间演练"的自动化形态。
 
 DESK_PIPELINE_DESCRIPTION = (
-    "跑一轮邮箱事务台:调用 read_recent_emails 读取近期 24 小时邮件,分类总结"
-    "(待办是跨类别正交维度),把提炼出的待办用 schedule_task 落进任务列表,"
-    "再按「分类账」格式调用 send_feishu_summary 推送日报到飞书群。"
+    "跑一轮邮箱事务台,共两步:1. 调用 read_recent_emails(hours=24, max_emails=10)"
+    " 读取近期 24 小时邮件,只调用一次。2. 把分类结果作为参数调用"
+    " submit_mailbox_desk_report 一次性提交——日报排版、待办落盘、飞书推送"
+    "都由该工具完成,不要再调 send_feishu_summary 或 schedule_task。"
 )
 
 
@@ -367,7 +368,7 @@ class TestPacemakerLoopDailyDeskTask(unittest.TestCase):
         self.assertIn("系统内部心跳触发", msg)
         self.assertIn("邮箱事务台", msg)
         self.assertIn("read_recent_emails", msg, "消息应携带管线指令原文")
-        self.assertIn("send_feishu_summary", msg)
+        self.assertIn("submit_mailbox_desk_report", msg)
 
     def test_daily_task_renews_and_does_not_refire(self):
         """触发后续期到明天:任务留在文件里、描述不变、下个周期不重复触发"""

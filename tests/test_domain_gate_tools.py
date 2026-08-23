@@ -5,42 +5,14 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from helpers import FakeSender, InjectedSender
+
 from auditronclaw.core.tools import domain_gate, feishu_tool
 from auditronclaw.core.tools.domain_gate import (
     DEFAULT_ALLOWED_DOMAINS,
     check_domain_allowed,
 )
 from auditronclaw.core.tools.feishu_tool import send_feishu_summary
-
-
-class FakeSender:
-    """测试假发送器：捕获发送内容与目标域，零真实网络。"""
-
-    def __init__(self, response=None, error=None):
-        self.sent = []
-        self.response = response or {"code": 0, "msg": "success"}
-        self.error = error
-
-    def __call__(self, webhook_url, payload):
-        if self.error:
-            raise self.error
-        self.sent.append((webhook_url, payload))
-        return self.response
-
-
-class InjectedSender:
-    """上下文管理器：模块内注入假 sender，退出时还原生产通道。"""
-
-    def __init__(self, fake):
-        self.fake = fake
-
-    def __enter__(self):
-        feishu_tool.set_sender(self.fake)
-        return self.fake
-
-    def __exit__(self, *exc):
-        feishu_tool.set_sender(None)
-        return False
 
 
 class TestDomainGatePureFunction(unittest.TestCase):

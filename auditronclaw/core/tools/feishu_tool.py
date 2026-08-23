@@ -72,11 +72,23 @@ def send_feishu_summary(summary_text: str) -> str:
 
     参数 summary_text 为要推送的完整文本（建议使用「分类账」格式日报）。
     """
+    _, message = push_text_via_bound_domain(
+        summary_text, tool_name=send_feishu_summary.name
+    )
+    return message
+
+
+def push_text_via_bound_domain(summary_text: str, tool_name: str):
+    """
+    命名推送的核心路径：凭据检查 → 域名门 → 活动 sender → 审计回执。
+    供 send_feishu_summary 与事务台提交工具共用——同一注入缝（_active_sender）、
+    同一道域名门、同一套审计词汇。返回 (是否成功, 给 LLM 看的脱敏回执文案)。
+    """
     try:
         # 0. 凭据前置检查：未配置时不碰网络，返回结构化错误
         webhook_url = get_feishu_webhook_url()
         if not webhook_url:
-            return (
+            return False, (
                 "❌ 推送失败：飞书 webhook 未配置（FEISHU_WEBHOOK_URL）。"
                 "请部署者在宿主机 .env 中配置后再试。"
             )
@@ -87,12 +99,12 @@ def send_feishu_summary(summary_text: str) -> str:
                 thread_id="system",
                 event="system_action",
                 content=(
-                    f"域名白名单拦截：工具 {send_feishu_summary.name} 目标域 "
+                    f"域名白名单拦截：工具 {tool_name} 目标域 "
                     f"'{FEISHU_WEBHOOK_DOMAIN}' 不在允许名单内，推送被拒绝。"
                     "如需扩展，请设置 AUDITRONCLAW_ALLOWED_DOMAINS 环境变量。"
                 ),
             )
-            return (
+            return False, (
                 f"❌ 推送失败：目标域名 '{FEISHU_WEBHOOK_DOMAIN}' 不在允许名单内，"
                 "本次推送已被域名白名单拦截并记录审计。"
             )
@@ -112,7 +124,7 @@ def send_feishu_summary(summary_text: str) -> str:
                 f"内容 {len(summary_text)} 字符。"
             ),
         )
-        return (
+        return True, (
             f" ✅ 飞书推送成功：已向群机器人发送 {len(summary_text)} 字符摘要，"
             f"飞书响应码 {response.get('code', 'unknown')}。"
         )
@@ -122,7 +134,9 @@ def send_feishu_summary(summary_text: str) -> str:
             event="system_action",
             content=f"飞书推送失败（网络层）：目标域 {FEISHU_WEBHOOK_DOMAIN}，错误类型 {type(e).__name__}。",
         )
-        return f"❌ 推送失败（网络层）：{type(e).__name__}。请稍后重试，待办与摘要内容未受影响。"
+        return False, (
+            f"❌ 推送失败（网络层）：{type(e).__name__}。请稍后重试，待办与摘要内容未受影响。"
+        )
     except Exception as e:
         # 结构化错误兜底：不把裸异常抛给 LLM。只报错误类型不透传 str(e)——
         # urllib 家族异常的 message 常内嵌完整请求 URL，透传即凭据泄露。
@@ -135,6 +149,6 @@ def send_feishu_summary(summary_text: str) -> str:
                 f"错误 {error_name}。"
             ),
         )
-        return (
+        return False, (
             f"❌ 推送失败（{error_name}）。请稍后重试，待办与摘要内容未受影响。"
         )
