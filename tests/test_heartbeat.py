@@ -45,7 +45,8 @@ class TestHeartbeatPacemaker(unittest.TestCase):
         """测试任务文件不存在时的行为"""
         from auditronclaw.core.heartbeat import pacemaker_loop
         
-        # 删除临时文件模拟不存在
+        # 删除临时文件模拟不存在(先关句柄:Windows 不允许删除打开中的文件)
+        self.temp_file.close()
         os.unlink(self.temp_file.name)
         
         # 运行一个周期（不等待实际间隔）
@@ -269,6 +270,125 @@ class TestHeartbeatTaskQueue(unittest.TestCase):
         # 这是一个集成测试的占位符
         # 实际测试需要 mock task_queue
         self.assertTrue(True)  # 占位断言
+
+
+# ============ 心跳 daily 任务实弹演练（邮箱事务台部署接线）============
+#
+# 部署形态:一条 repeat="daily" 的循环任务,description 即事务台管线指令。
+# 上面 TestHeartbeatPacemaker 的用例只钉了任务文件形状,没有真跑 pacemaker_loop;
+# 部署前必须可观测到:到期 → 系统消息进会话队列(带管线指令)→ 任务续期 →
+# 下个周期不重复触发。这是"手动改时间演练"的自动化形态。
+
+DESK_PIPELINE_DESCRIPTION = (
+    "跑一轮邮箱事务台,共两步:1. 调用 read_recent_emails(hours=24, max_emails=10)"
+    " 读取近期 24 小时邮件,只调用一次。2. 把分类结果作为参数调用"
+    " submit_mailbox_desk_report 一次性提交——日报排版、待办落盘、飞书推送"
+    "都由该工具完成,不要再调 send_feishu_summary 或 schedule_task。"
+)
+
+
+class TestPacemakerLoopDailyDeskTask(unittest.TestCase):
+    """真跑 pacemaker_loop:due 的 daily 事务台任务触发、续期、不重复。"""
+
+    def setUp(self):
+        import auditronclaw.core.config
+        import auditronclaw.core.heartbeat
+
+        fd, path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        self.temp_path = path
+        self._orig_config = auditronclaw.core.config.TASKS_FILE
+        self._orig_heartbeat = auditronclaw.core.heartbeat.TASKS_FILE
+        # 与 TestHeartbeatPacemaker 同法:临时任务文件,不碰真实 workspace
+        auditronclaw.core.config.TASKS_FILE = path
+        auditronclaw.core.heartbeat.TASKS_FILE = path
+
+    def tearDown(self):
+        import auditronclaw.core.config
+        import auditronclaw.core.heartbeat
+
+        auditronclaw.core.config.TASKS_FILE = self._orig_config
+        auditronclaw.core.heartbeat.TASKS_FILE = self._orig_heartbeat
+        # Windows:文件被占用时删除会 WinError 32,先确认句柄已关
+        if os.path.exists(self.temp_path):
+            os.unlink(self.temp_path)
+
+    def _write_due_daily_task(self):
+        """写入一条刚到期的 daily 事务台任务,返回其 target_time。"""
+        due = datetime.now() - timedelta(minutes=1)
+        due_str = due.strftime("%Y-%m-%d %H:%M:%S")
+        tasks = [{
+            "id": "desk01",
+            "target_time": due_str,
+            "description": DESK_PIPELINE_DESCRIPTION,
+            "repeat": "daily",
+            "repeat_count": None,
+        }]
+        with open(self.temp_path, "w", encoding="utf-8") as f:
+            json.dump(tasks, f, ensure_ascii=False, indent=2)
+        return due
+
+    def _run_pacemaker(self, seconds):
+        """跑起搏器若干秒后取消,返回它的任务队列(已触发的消息都在里面)。"""
+        from auditronclaw.core.heartbeat import pacemaker_loop
+
+        queue = asyncio.Queue()
+
+        async def drill():
+            worker = asyncio.create_task(
+                pacemaker_loop(task_queue=queue, check_interval=0.05)
+            )
+            await asyncio.sleep(seconds)
+            worker.cancel()
+            try:
+                await worker
+            except asyncio.CancelledError:
+                pass
+
+        asyncio.run(drill())
+        return queue
+
+    @staticmethod
+    def _drain(queue):
+        """取空队列并返回消息列表。"""
+        messages = []
+        while not queue.empty():
+            messages.append(queue.get_nowait())
+        return messages
+
+    def test_due_daily_task_drives_pipeline_message_into_queue(self):
+        """到期触发可观测:系统心跳消息进会话队列,携带完整管线指令"""
+        self._write_due_daily_task()
+
+        queue = self._run_pacemaker(seconds=0.3)
+
+        fired = self._drain(queue)
+        self.assertEqual(len(fired), 1, "到期任务应触发恰好一条系统消息")
+        msg = fired[0]
+        self.assertIn("系统内部心跳触发", msg)
+        self.assertIn("邮箱事务台", msg)
+        self.assertIn("read_recent_emails", msg, "消息应携带管线指令原文")
+        self.assertIn("submit_mailbox_desk_report", msg)
+
+    def test_daily_task_renews_and_does_not_refire(self):
+        """触发后续期到明天:任务留在文件里、描述不变、下个周期不重复触发"""
+        due = self._write_due_daily_task()
+
+        queue = self._run_pacemaker(seconds=0.3)
+
+        # 0.3 秒 / 0.05 秒间隔 ≈ 6 个周期,只有第一次触发——无重复触发风暴
+        fired_count = len(self._drain(queue))
+        self.assertEqual(fired_count, 1)
+
+        # 任务被续期而非删除:明天的同一时刻,description 原封不动
+        with open(self.temp_path, encoding="utf-8") as f:
+            tasks = json.load(f)
+        self.assertEqual(len(tasks), 1, "daily 任务触发后必须留存(续期),不能被删")
+        renewed = tasks[0]
+        expected_next = (due + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+        self.assertEqual(renewed["target_time"], expected_next)
+        self.assertEqual(renewed["repeat"], "daily")
+        self.assertEqual(renewed["description"], DESK_PIPELINE_DESCRIPTION)
 
 
 if __name__ == '__main__':

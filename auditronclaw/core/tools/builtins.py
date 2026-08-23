@@ -1,5 +1,6 @@
 from datetime import datetime
 from .base import auditronclaw_tool, AuditronClawBaseTool
+from .desk_tool import submit_mailbox_desk_report
 import ast
 import operator
 import os
@@ -15,6 +16,8 @@ from .sandbox_tools import (
     write_office_file,
     execute_office_shell
 )
+from .feishu_tool import send_feishu_summary
+from .mail_tool import read_recent_emails
 
 
 tasks_lock = threading.Lock()
@@ -171,6 +174,41 @@ def calculator(expression: str) -> str:
         return f"计算出错，请检查表达式格式。错误信息: {str(e)}"
 
 
+def _append_task(target_time: str, description: str, repeat: str = None, repeat_count: int = None) -> None:
+    """
+    向任务队列文件追加一条任务（线程锁内读-改-写）。
+
+    待办落盘的唯一写入口：schedule_task 与事务台提交工具共用，
+    保证 tasks.json 的条目形状（id/target_time/description/repeat/repeat_count）
+    始终一致——不管待办是人定的还是事务台提炼的。
+    读取/写入异常向上抛，由调用方决定如何向 LLM 结构化报告。
+    """
+    with tasks_lock:
+        tasks = []
+        if os.path.exists(TASKS_FILE):
+            try:
+                with open(TASKS_FILE, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                    if content:
+                        tasks = json.loads(content)
+            except Exception as e:
+                raise RuntimeError(f"读取任务队列异常 {str(e)}")
+
+        tasks.append({
+            "id": str(uuid.uuid4())[:8],
+            "target_time": target_time,
+            "description": description,
+            "repeat": repeat,
+            "repeat_count": repeat_count
+        })
+
+        try:
+            with open(TASKS_FILE, "w", encoding="utf-8") as f:
+                json.dump(tasks, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            raise RuntimeError(f"写入任务队列异常 {str(e)}")
+
+
 @auditronclaw_tool
 def schedule_task(target_time: str, description: str, repeat: str = None, repeat_count: int = None) -> str:
     """
@@ -208,31 +246,10 @@ def schedule_task(target_time: str, description: str, repeat: str = None, repeat
             f" 你传入的是：{target_time}"
         )
 
-    with tasks_lock:
-        tasks = []
-        if os.path.exists(TASKS_FILE):
-            try:
-                with open(TASKS_FILE, "r", encoding="utf-8") as f:
-                    content = f.read().strip()
-                    if content:
-                        tasks = json.loads(content)
-            except Exception as e:
-                return f"设定失败：读取任务队列异常 {str(e)}"
-
-        new_task = {
-            "id": str(uuid.uuid4())[:8],
-            "target_time": target_time,
-            "description": description,
-            "repeat": repeat,
-            "repeat_count": repeat_count
-        }
-        tasks.append(new_task)
-
-        try:
-            with open(TASKS_FILE, "w", encoding="utf-8") as f:
-                json.dump(tasks, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            return f"设定失败：写入任务队列异常 {str(e)}"
+    try:
+        _append_task(target_time, description, repeat, repeat_count)
+    except RuntimeError as e:
+        return f"设定失败：{str(e)}"
 
     msg = f" 任务已成功加入队列。首发时间：{target_time} | 任务：{description}"
     if repeat:
@@ -379,5 +396,8 @@ BUILTIN_TOOLS = [
     schedule_task,
     list_scheduled_tasks,
     delete_scheduled_task,
-    modify_scheduled_task
+    modify_scheduled_task,
+    send_feishu_summary,
+    read_recent_emails,
+    submit_mailbox_desk_report
 ]

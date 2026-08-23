@@ -79,6 +79,65 @@ class TestAgent(unittest.TestCase):
             print(f"Unexpected error: {e}")
             raise
 
+    def test_extra_tools_append_after_builtin(self):
+        """extra_tools 追加注入（ADR-001）：内置工具全保留，外接工具按个追加"""
+        from auditronclaw.core.agent import create_agent_app
+        from langchain_core.tools import tool
+
+        @tool
+        def fake_builtin(x: int) -> int:
+            """builtin placeholder"""
+            return x
+
+        @tool
+        def extra_one(x: int) -> int:
+            """extra tool"""
+            return x
+
+        with patch('auditronclaw.core.agent.BUILTIN_TOOLS', [fake_builtin]), \
+             patch('auditronclaw.core.agent.load_dynamic_skills', return_value=[]), \
+             patch('auditronclaw.core.agent.get_provider') as mock_get_provider:
+            mock_provider = Mock()
+            mock_provider.bind_tools.return_value = Mock()
+            mock_get_provider.return_value = mock_provider
+
+            create_agent_app(
+                provider_name="openai", model_name="test-model",
+                extra_tools=[extra_one]
+            )
+
+            bound = mock_provider.bind_tools.call_args[0][0]
+            names = [t.name for t in bound]
+            self.assertIn("fake_builtin", names, "内置工具必须保留")
+            self.assertIn("extra_one", names, "外接工具必须追加")
+
+    def test_extra_tools_same_name_overrides_builtin(self):
+        """同名时 extra_tools 覆盖内置（文档化规则），且只保留一个"""
+        from auditronclaw.core.agent import create_agent_app
+        from langchain_core.tools import StructuredTool
+
+        builtin_dup = StructuredTool.from_function(
+            func=lambda x: x, name="dup_name", description="builtin version")
+        extra_dup = StructuredTool.from_function(
+            func=lambda x: x, name="dup_name", description="extra version")
+
+        with patch('auditronclaw.core.agent.BUILTIN_TOOLS', [builtin_dup]), \
+             patch('auditronclaw.core.agent.load_dynamic_skills', return_value=[]), \
+             patch('auditronclaw.core.agent.get_provider') as mock_get_provider:
+            mock_provider = Mock()
+            mock_provider.bind_tools.return_value = Mock()
+            mock_get_provider.return_value = mock_provider
+
+            create_agent_app(
+                provider_name="openai", model_name="test-model",
+                extra_tools=[extra_dup]
+            )
+
+            bound = mock_provider.bind_tools.call_args[0][0]
+            dups = [t for t in bound if t.name == "dup_name"]
+            self.assertEqual(len(dups), 1, "同名只保留一个")
+            self.assertEqual(dups[0].description, "extra version", "外接版本胜出")
+
     @patch('auditronclaw.core.provider.get_provider')
     @patch('auditronclaw.core.skill_loader.load_dynamic_skills')
     @patch('auditronclaw.core.tools.builtins.BUILTIN_TOOLS', [])

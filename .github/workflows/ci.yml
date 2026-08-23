@@ -33,9 +33,9 @@ jobs:
           --ignore=tests/test_two_phase_skills.py
           --deselect "tests/test_heartbeat.py::TestHeartbeatPacemaker::test_no_tasks_file"
 
-  # 双基准冒烟:注入 + golden 各前 3 条,验证 runner 没被代码改动弄坏。
+  # 双基准冒烟:注入 + golden 各前 3 条 + email/mailbox_desk 新面,验证 runner 没被代码改动弄坏。
   # 刻意只在 schedule/手动触发跑——日常 push 不烧 LLM 调用费,
-  # 全量(注入 50 + golden 37)由维护者本地跑,数字进 README。
+  # 全量(注入 56 + golden 39)由维护者本地跑,数字进 README。
   bench-smoke:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -52,18 +52,22 @@ jobs:
           pip install -r requirements.txt
           pip install pyyaml
 
-      - name: 注入基准冒烟(前 3 条,真实 LLM)
+      - name: 注入基准冒烟(前 3 条 + email 面第 1 条,真实 LLM)
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
           DEFAULT_PROVIDER: ${{ secrets.DEFAULT_PROVIDER }}
           DEFAULT_MODEL: ${{ secrets.DEFAULT_MODEL }}
-        run: python benchmarks/run_injection_bench.py --limit 3
+        run: |
+          python benchmarks/run_injection_bench.py --limit 3
+          python benchmarks/run_injection_bench.py --surface email --limit 1
 
-      - name: golden 能力基准冒烟(前 3 条,真实 LLM)
+      - name: golden 能力基准冒烟(前 3 条 + mailbox_desk 面第 1 条,真实 LLM)
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
           DEFAULT_PROVIDER: ${{ secrets.DEFAULT_PROVIDER }}
           DEFAULT_MODEL: ${{ secrets.DEFAULT_MODEL }}
-        run: python benchmarks/run_golden_eval.py --limit 3
+        run: |
+          python benchmarks/run_golden_eval.py --limit 3
+          python benchmarks/run_golden_eval.py --surface mailbox_desk --limit 1
