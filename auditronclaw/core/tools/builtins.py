@@ -16,6 +16,7 @@ from .sandbox_tools import (
     execute_office_shell
 )
 from .feishu_tool import send_feishu_summary
+from .mail_tool import read_recent_emails
 
 
 tasks_lock = threading.Lock()
@@ -381,5 +382,6 @@ BUILTIN_TOOLS = [
     list_scheduled_tasks,
     delete_scheduled_task,
     modify_scheduled_task,
-    send_feishu_summary
+    send_feishu_summary,
+    read_recent_emails
 ]
