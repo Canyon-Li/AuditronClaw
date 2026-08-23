@@ -15,6 +15,7 @@ from .sandbox_tools import (
     write_office_file,
     execute_office_shell
 )
+from .feishu_tool import send_feishu_summary
 
 
 tasks_lock = threading.Lock()
@@ -379,5 +380,6 @@ BUILTIN_TOOLS = [
     schedule_task,
     list_scheduled_tasks,
     delete_scheduled_task,
-    modify_scheduled_task
+    modify_scheduled_task,
+    send_feishu_summary
 ]

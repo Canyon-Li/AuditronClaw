@@ -32,6 +32,10 @@ workspace/office
 .codojo/
 .claude/
 docs/local
+# 本地自留:agent 配置与内部工单
+CLAUDE.md
+.scratch/
+docs/agents/
 .vscode/
 .vscode/settings.json
 # 注入基准运行结果(时间戳目录,含 LLM 原始输出)
