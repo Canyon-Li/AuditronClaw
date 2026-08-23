@@ -570,3 +570,129 @@ print(len(open(sys.argv[1], encoding='utf-8').read().split()), 'words')"
       tool: env_check
       arg_contains: "run"
   expect: passed
+
+# ============================================================
+# 面 ⑦:mailbox_desk(邮箱事务台,2 条)
+# 测:镇馆展品整链——读取(fixture)→ 分类总结 → 待办落 tasks.json(双锚)
+#     → 分类账格式推送(假 sender 捕获)。输出格式原型已拍板:
+#     分支 prototype/mailbox-desk-output-format(commit c09eafc),C 分类账。
+# 待办是跨类别正交维度(category 与 todos[] 并存):gold_desk_002 断言
+# "通知类邮件携带待办"成立,不把邮件分成互斥的待办/通知五类。
+# setup.mailbox.mails: fixture 邮箱;hours_ago 相对量,运行期换算 ISO 日期。
+# ============================================================
+
+- id: gold_desk_001
+  surface: mailbox_desk
+  setup:
+    mailbox:
+      mails:
+        - sender: "招商银行 <ccsvc@mail.creditcard.example>"
+          subject: "【账单提醒】您本期信用卡账单已出"
+          hours_ago: 2
+          body: "尊敬的客户:您本期账单应还 ¥2,186.00,最后还款日 2026-08-26,请及时还款,逾期将影响信用记录。"
+        - sender: "GitHub <noreply@github.com>"
+          subject: "[AuditronClaw] Pull request #12 was approved"
+          hours_ago: 4
+          body: "canyon-li approved your pull request #12. All checks have passed. This branch has no conflicts with the base branch."
+        - sender: "老王 <laowang@friends.example>"
+          subject: "周六火锅走不走?"
+          hours_ago: 6
+          body: "上次说的火锅,这周六怎么样?老地方还是试试公司后面新开的那家?你定地方,回我一下。"
+        - sender: "瑞幸咖啡 <promotions@mail-luckin.example>"
+          subject: "周周 9.9,你的咖啡券到账"
+          hours_ago: 8
+          body: "本周幸运券已发放,9.9 元喝大杯,点击领取。"
+  trigger: |
+    跑一轮邮箱事务台,按以下管线指令执行:
+    1. 调用 read_recent_emails 读取近期 24 小时邮件。
+    2. 分类总结。分类规则:待办是跨类别正交维度——性质上属于"通知"的邮件
+       (如账单、续费提醒)同样携带待办,不要因为它是通知就漏掉待办。
+       需要对方回话的归"需回复",纯促销归"可忽略"。
+    3. 把提炼出的每条待办调用 schedule_task 存进任务列表(时间取邮件里的
+       截止日,没有截止日的设到明天)。
+    4. 把日报按「分类账」格式调用 send_feishu_summary 推送到飞书群,
+       结构固定:第一行计头:邮箱事务台日报 | 窗口24小时 | 共N封 · 跨类别
+       待办 M 项;正文四段:■ 待办(逐项带来源与截止)/ ■ 需回复(逐封)/
+       ■ 通知(一行一封)/ ■ 可忽略(只留计数,不逐封展开)。
+    5. 顺序要求:第 3 步与第 4 步都要真正调用工具完成,不得在对话里
+       复述"已推送/已存入"代替工具调用;全部做完后回复才算完成。
+  asserts:
+    - type: required_tool_call
+      tool: read_recent_emails
+    - type: required_tool_call
+      tool: schedule_task
+    - type: file_content
+      path: tasks.json
+      contains: "还款"
+    # 分类账形状断言:计头(共N封 + 跨类别待办计数)+ 四段结构全部钉住。
+    # 共N封 由工具返回的窗口计数保证,计头数字是管线自产信息,非套套逻辑。
+    - type: push_contains
+      contains: "共"
+    - type: push_contains
+      contains: "跨类别待办"
+    - type: push_contains
+      contains: "待办"
+    - type: push_contains
+      contains: "需回复"
+    - type: push_contains
+      contains: "通知"
+    - type: push_contains
+      contains: "可忽略"
+  expect: passed
+
+- id: gold_desk_002
+  surface: mailbox_desk
+  setup:
+    mailbox:
+      mails:
+        - sender: "腾讯云 <noreply@qcloud.example>"
+          subject: "【续费提醒】您的云服务器将于 09-02 到期"
+          hours_ago: 1
+          body: "您的云服务器实例将于 2026-09-02 到期,到期后实例将被释放且数据不可恢复,请及时续费。"
+        - sender: "BOSS直聘 <noreply@mail.zhipin.example>"
+          subject: "有 2 位招聘者查看了你的简历"
+          hours_ago: 5
+          body: "你的简历上周曝光量提升 40%,有 2 位招聘者查看了你的简历。"
+        - sender: "拼多多 <noreply@mail-pdd.example>"
+          subject: "现金大转盘,仅差 0.01 元提现"
+          hours_ago: 6
+          body: "邀请好友助力,立即提现。"
+        - sender: "美团 <service@mail-meituan.example>"
+          subject: "您有一张 15 元外卖红包待使用"
+          hours_ago: 7
+          body: "红包今日 24 点过期,点击使用。"
+  trigger: |
+    跑一轮邮箱事务台,按以下管线指令执行:
+    1. 调用 read_recent_emails 读取近期 24 小时邮件。
+    2. 分类总结。分类规则:待办是跨类别正交维度——性质上属于"通知"的邮件
+       (如账单、续费提醒)同样携带待办,不要因为它是通知就漏掉待办。
+       纯促销/营销类归"可忽略"。
+    3. 把提炼出的每条待办调用 schedule_task 存进任务列表(时间取邮件里的
+       截止日,没有截止日的设到明天)。
+    4. 把日报按「分类账」格式调用 send_feishu_summary 推送到飞书群,
+       结构固定:第一行计头:邮箱事务台日报 | 窗口24小时 | 共N封 · 跨类别
+       待办 M 项;正文四段:■ 待办(逐项带来源与截止)/ ■ 需回复(逐封)/
+       ■ 通知(一行一封)/ ■ 可忽略(只留计数,不逐封展开)。
+    5. 顺序要求:第 3 步与第 4 步都要真正调用工具完成,不得在对话里
+       复述"已推送/已存入"代替工具调用;全部做完后回复才算完成。
+  asserts:
+    - type: required_tool_call
+      tool: read_recent_emails
+    - type: required_tool_call
+      tool: schedule_task
+    - type: file_content
+      path: tasks.json
+      contains: "续费"
+    # 正交维度断言:续费邮件性质是"通知"但携带待办——待办与通知两段并存,
+    # 缺一段即证明把邮件分成了互斥五类(原型拍板的反命题)。
+    - type: push_contains
+      contains: "共"
+    - type: push_contains
+      contains: "跨类别待办"
+    - type: push_contains
+      contains: "待办"
+    - type: push_contains
+      contains: "通知"
+    - type: push_contains
+      contains: "可忽略"
+  expect: passed

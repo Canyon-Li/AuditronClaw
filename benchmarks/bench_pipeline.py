@@ -20,8 +20,9 @@ import json
 import os
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from contextlib import contextmanager
 
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
@@ -64,6 +65,63 @@ def reload_with_workspace(workspace: str) -> None:
 
 # ============ 用例执行 ============
 
+# 邮箱事务台注入缝(接缝 B 的基准侧):fixture 邮箱 + 假 sender + 占位凭据。
+# 占位凭据骗过工具层"未配置不碰网络"的前置检查——离开本上下文即还原生产通道。
+_BENCH_MAIL_ENV = {
+    "MAIL_ACCOUNT": "bench@fixture.local",
+    "MAIL_IMAP_PASSWORD": "bench-placeholder",
+    "FEISHU_WEBHOOK_URL": "https://open.feishu.cn/bench-fixture-webhook",
+}
+
+
+@contextmanager
+def mailbox_fixture(spec: dict, workspace: str):
+    """
+    注入邮箱事务台的测试通道:邮件从 fixture 文件读,推送进捕获列表,零真实网络。
+
+    spec 为用例 setup.mailbox({mails: [{sender,subject,hours_ago,body}]}),
+    hours_ago 在运行期换算 ISO 日期——用例不写绝对日期,任何时刻跑都在窗口内。
+    yield 捕获器(pushes 属性 = 已推送文本列表);退出时还原传输层与环境变量。
+    """
+    import auditronclaw.core.tools.mail_tool as mail_tool
+    import auditronclaw.core.tools.feishu_tool as feishu_tool
+
+    fixture_path = os.path.join(workspace, "bench_mailbox.json")
+    now = datetime.now()
+    raw = [{
+        "sender": m["sender"],
+        "subject": m["subject"],
+        "date": (now - timedelta(hours=m["hours_ago"])).isoformat(),
+        "body": m["body"],
+    } for m in spec["mails"]]
+    Path(fixture_path).write_text(
+        json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    class _Capture:
+        def __init__(self):
+            self.pushes = []
+
+        def fake_sender(self, webhook_url, payload):
+            self.pushes.append(payload["content"]["text"])
+            return {"code": 0, "msg": "success"}
+
+    capture = _Capture()
+    saved_env = {k: os.environ.get(k) for k in _BENCH_MAIL_ENV}
+    os.environ.update(_BENCH_MAIL_ENV)
+    mail_tool.set_provider(mail_tool.load_fixture_provider(fixture_path))
+    feishu_tool.set_sender(capture.fake_sender)
+    try:
+        yield capture
+    finally:
+        mail_tool.set_provider(None)
+        feishu_tool.set_sender(None)
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 async def run_case(case: dict, model_name: str, provider_name: str,
                    thread_prefix: str = "bench") -> dict:
     """执行单条用例,返回原始轨迹(不含任何判定,由各 suite 的 judge 补)。"""
@@ -78,6 +136,21 @@ async def run_case(case: dict, model_name: str, provider_name: str,
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(spec["content"], encoding="utf-8")
 
+    # setup: 邮箱事务台用例注入 fixture 邮箱与假 sender(零网络;有 mailbox 键即注入)
+    pushes = []
+    mailbox_spec = case.get("setup", {}).get("mailbox")
+    if mailbox_spec:
+        with mailbox_fixture(mailbox_spec, workspace) as capture:
+            return await _drive_agent(case, workspace, model_name,
+                                      provider_name, thread_prefix, capture.pushes)
+    return await _drive_agent(case, workspace, model_name,
+                              provider_name, thread_prefix, pushes)
+
+
+async def _drive_agent(case: dict, workspace: str, model_name: str,
+                       provider_name: str, thread_prefix: str, pushes: list) -> dict:
+    """驱动 agent 跑完 trigger 并结构化轨迹(pipeline 的执行工位,与 setup 工位分离)。"""
+    case_id = case["id"]
     from auditronclaw.core.agent import create_agent_app
 
     thread_id = f"{thread_prefix}/{case_id}"
@@ -112,6 +185,7 @@ async def run_case(case: dict, model_name: str, provider_name: str,
         "tool_calls": tool_calls,
         "tool_results": tool_results,
         "reply": "\n".join(reply_text),
+        "pushes": pushes,
     }
 
 
