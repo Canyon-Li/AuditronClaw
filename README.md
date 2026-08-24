@@ -154,33 +154,85 @@ benchmarks/               注入基准 × 能力基准（共享隔离流水线�
 
 > 前提：Python ≥ 3.10，Windows / macOS / Linux 均可
 
+### 第 1 步 · 安装
+
 ```bash
-# 1. 克隆并安装
+# 克隆项目
 git clone https://github.com/Canyon-Li/AuditronClaw.git
 cd AuditronClaw
-python -m venv .venv
-#    Windows: .venv\Scripts\activate   Unix: source .venv/bin/activate
-pip install -e .   # 国内可加 -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# 2. 配置模型（交互式向导：选提供商 / 填 API Key / 自动连接测试）
+# 安装依赖并注册命令行工具（一步完成）
+pip install -e .   # 国内可加 -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+> 💡 推荐使用虚拟环境：
+> ```bash
+> python -m venv .venv
+> #    Windows: .venv\Scripts\activate   Unix: source .venv/bin/activate
+> pip install -e .
+> ```
+
+### 第 2 步 · 配置模型
+
+**方式一：自动配置向导（推荐）**
+
+```bash
 auditronclaw config
 ```
 
-支持 openai / anthropic / 阿里云 / 腾讯云 / z.ai / 任意 OpenAI 兼容接口，以及 [Ollama](https://ollama.com)（本地部署，无需 Key）。也可跳过向导：复制 `.env.example` 为 `.env` 手动编辑。
+向导依次引导：选提供商 → 填 API Key → 可选 Base URL（代理/兼容接口）→ 自动测试连接。支持 openai / anthropic / 阿里云 / 腾讯云 / z.ai / 任意 OpenAI 兼容接口，以及 [Ollama](https://ollama.com)（本地部署，无需 Key）。
 
-装技能：放入 `workspace/office/skills/<技能名>/SKILL.md`（兼容 OpenClaw / Claude Code 技能格式），支持热更新，无需重启。
-
-邮箱事务台（心跳引擎驱动的每日"读取 → 分类总结 → 待办落盘 → 飞书推送"流水线）：部署清单见 [docs/deploy/mailbox-desk.md](docs/deploy/mailbox-desk.md)。
+**方式二：手动配置**
 
 ```bash
-# 3. 启动主程序（--thread 可选，隔离会话历史/画像/日志）
-auditronclaw run
+cp .env.example .env   # 然后编辑 .env 填入提供商与 Key，效果等同向导
+```
 
-# 4. 监控终端（另开一个终端；run 用了 --thread 时，这里传同名参数才能看到对应日志流）
+### 第 3 步 · 运行
+
+```bash
+auditronclaw run
+# 可选：--thread <名字> 隔离会话历史/画像/日志（默认 local_geek_master）
+```
+
+### 第 4 步 · 基本用法
+
+直接用自然语言对话，它会自动选择工具：
+
+| 类型 | 示例 |
+|---|---|
+| 时间查询 | 现在几点了？ |
+| 数学计算 | (123.45 + 678.9) × 2 等于多少 |
+| 定时任务 | 5 分钟后提醒我喝水 / 每周一早 9 点提醒我写周报 |
+| 任务管理 | 查看我的定时任务 / 把 1 号任务改到 10 点 / 删除 2 号任务 |
+| 文件操作 | 列出 office 里的文件 / 读取 notes/todo.md / 把"买猫粮"追加到 notes/todo.md |
+| Shell 命令 | 在 office 里执行 ls -la |
+| 记住偏好 | 记住：我喜欢简洁的回复 |
+| 退出 | /exit |
+
+文件与 shell 操作只在 `workspace/office/` 沙盒内生效，白名单外的命令会被拒绝并留审计。
+
+### 第 5 步 · 监控终端与审计日志
+
+想看它"具体干了什么"，两条路：
+
+```bash
+# 实时：另开一个终端，彩色事件流（run 用了 --thread 时，这里传同名参数）
 auditronclaw monitor
 
-# 基准复现（前置：完成第 2 步配置；95 条用例会真实调用模型 API，产生少量开销，
-# 可用 --model / --provider 覆盖默认值）
+# 事后：翻审计日志，一行一个 JSON——tool_call 含完整参数，tool_result 含返回，
+# ai_message 是它对你说的话；核验"说干了是不是真干了"就看这两条
+tail -f logs/local_geek_master.jsonl
+grep '"event": "tool_call"' logs/local_geek_master.jsonl | tail -20
+```
+
+### 进阶
+
+- 装技能：放入 `workspace/office/skills/<技能名>/SKILL.md`（兼容 OpenClaw / Claude Code 技能格式），支持热更新，无需重启
+- 邮箱事务台（每日"读取 → 分类总结 → 待办落盘 → 飞书推送"流水线）：部署与使用见 [docs/deploy/mailbox-desk.md](docs/deploy/mailbox-desk.md)
+- 基准复现（前置：完成第 2 步配置；95 条用例会真实调用模型 API，产生少量开销，可用 `--model` / `--provider` 覆盖默认值）：
+
+```bash
 python benchmarks/run_injection_bench.py
 python benchmarks/run_golden_eval.py
 ```
@@ -190,6 +242,7 @@ python benchmarks/run_golden_eval.py
 - **配置向导没反应 / 无法交互**：直接 `cp .env.example .env` 手动填写，效果等同。
 - **openai / anthropic 直连超时**：在向导中填写代理 Base URL，或改用国内 OpenAI 兼容接口（阿里云 / 腾讯云 / z.ai）。
 - **基准跑一次开销多大**：95 条用例逐条真实调用模型，费用取决于所选模型，建议先用低价模型（如 glm-4-flash）跑通流程。
+- **`auditronclaw` 命令不存在 / venv 里没有 pip**：个别环境下建出的 venv 不带 pip，先 `.venv/Scripts/python -m ensurepip --upgrade` 再重跑 `pip install -e .`；或跳过注册，直接 `.venv/Scripts/python -m entry.cli run`，效果等同。
 
 ---
 
