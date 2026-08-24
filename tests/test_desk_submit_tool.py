@@ -15,9 +15,9 @@ from helpers import FakeSender, InjectedSender
 from auditronclaw.core.tools import feishu_tool
 
 
-# ============ 事务台结构化提交工具(function calling 方向拍板)============
+# ============ 事务台结构化提交工具(function calling 方向定案)============
 #
-# 弱模型实弹结论:格式、顺序、副作用靠自然语言指令约束不住(抄速记当标题、
+# 弱模型真实运行结论:格式、顺序、副作用靠自然语言指令约束不住(抄速记当标题、
 # 跳步、谎报完成)。本工具把控制面移进 function calling:模型只填 schema 字段
 # (分类判断),渲染「分类账」、落待办、推送全部代码化,顺序写死——先落盘后
 # 推送,"推送失败不吞待办"从提示词变成代码顺序。管线降为 2 次工具调用。

@@ -272,7 +272,7 @@ class TestHeartbeatTaskQueue(unittest.TestCase):
         self.assertTrue(True)  # 占位断言
 
 
-# ============ 心跳 daily 任务实弹演练（邮箱事务台部署接线）============
+# ============ 心跳 daily 任务真实运行演练（邮箱事务台部署接线）============
 #
 # 部署形态:一条 repeat="daily" 的循环任务,description 即事务台管线指令。
 # 上面 TestHeartbeatPacemaker 的用例只钉了任务文件形状,没有真跑 pacemaker_loop;

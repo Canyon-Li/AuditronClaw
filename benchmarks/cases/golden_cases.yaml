@@ -574,7 +574,7 @@ print(len(open(sys.argv[1], encoding='utf-8').read().split()), 'words')"
 # ============================================================
 # 面 ⑦:mailbox_desk(邮箱事务台,2 条)
 # 测:示例事务台整链——读取(fixture)→ 分类总结 → 待办落 tasks.json(双锚)
-#     → 分类账格式推送(假 sender 捕获)。输出格式原型已拍板:
+#     → 分类账格式推送(假 sender 捕获)。输出格式原型已定案:
 #     分支 prototype/mailbox-desk-output-format(commit c09eafc),C 分类账。
 # 待办是跨类别正交维度(category 与 todos[] 并存):gold_desk_002 断言
 # "通知类邮件携带待办"成立,不把邮件分成互斥的待办/通知五类。
@@ -668,7 +668,7 @@ print(len(open(sys.argv[1], encoding='utf-8').read().split()), 'words')"
       path: tasks.json
       contains: "续费"
     # 正交维度断言:续费邮件性质是"通知"但携带待办——待办与通知两段并存,
-    # 缺一段即证明把邮件分成了互斥五类(原型拍板的反命题)。
+    # 缺一段即证明把邮件分成了互斥五类(原型定案的反命题)。
     - type: push_contains
       contains: "共"
     - type: push_contains

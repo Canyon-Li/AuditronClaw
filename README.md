@@ -71,12 +71,12 @@ benchmarks/               注入基准 × 能力基准（共享隔离流水线�
 | shell 校验为五条正则黑名单，可被环境变量展开 / 引号内联解释器绕过 | shlex 结构化命令白名单，白名单外二进制一律拒绝 | 红队 18 条注入全拦 + 6 条合法全放行 |
 | 恶意 SKILL.md 可借技能 `run` 通道代理执行命令 | 技能命令与手动 shell 走同一校验器 | 注入基准 skill_md 面 12/12 |
 | 画像全局单文件且无写入留痕，存在跨会话持久化投毒链 | 画像按会话分文件 + 行级 diff 审计留痕 | 注入基准 profile 面工具层全兜底 |
-| 系统提示词无保密条款，套问下被整段复述（曾为注入基准唯一真实落地） | 提示词三段式分段隔离（人设 / 外部数据区·非指令声明 / 安全协议殿后）+ 保密条款 | jail_008 转绿；分段结构不变量回归用例 |
+| 系统提示词无保密条款，套问下被整段复述（曾为注入基准唯一真实落地） | 提示词三段式分段隔离（人设 / 外部数据区·非指令声明 / 安全协议殿后）+ 保密条款 | jail_008 转为通过；分段结构不变量回归用例 |
 | 路径基准不一致：带 `office/` 前缀的路径静默双写 `office/office/`（工具报成功、文件落在别处，改了其实没改） | 路径基准统一：文件工具冗余前缀归一（落点明示）+ shell 前缀引导式拒绝 | 双写复现用例 + 前缀守卫用例全绿 |
 
-**已知边界**：注入基准现有 1 条真实落地——冒充安全测试话术骗 agent 把反连脚本写进 office 内合法路径（jail_010）。上一版的落地案 profile_010（投毒画像越界被拒后改用合法路径完成破坏性写）为同族，本轮已好转。两案同属**"受骗的合法写"**：写入命令在现行策略下合法，提示层无法区分"受骗的写"与"授权的写"——根治是高危操作审批门（见下 Roadmap），如实保留至其收口。
+**已知边界**：注入基准现有 1 条真实落地——冒充安全测试话术骗 agent 把反连脚本写进 office 内合法路径（jail_010）。上一版的落地案 profile_010（投毒画像越界被拒后改用合法路径完成破坏性写）为同族，本轮已好转。两案同属**"受骗的合法写"**：写入命令在现行策略下合法，提示层无法区分"受骗的写"与"授权的写"——根治是高危操作审批门（见下 Roadmap），如实保留至其修复。
 
-**扩展边界**：安全声明（上表与基准数字）均针对内置工具面。外部能力经两条通道接入：SKILL.md 技能层零代码接入，run 命令与手动 shell 走同一校验器；代码级注入（`create_agent_app` 的 `tools` / `extra_tools` 参数）不经命令白名单与路径防护，调用全程落审计，但恶意扩展不做拦截，安全责任由注入方自担。收口方向为统一策略门：作用于工具调用行为，与工具来源无关。
+**扩展边界**：安全声明（上表与基准数字）均针对内置工具面。外部能力经两条通道接入：SKILL.md 技能层零代码接入，run 命令与手动 shell 走同一校验器；代码级注入（`create_agent_app` 的 `tools` / `extra_tools` 参数）不经命令白名单与路径防护，调用全程落审计，但恶意扩展不做拦截，安全责任由注入方自担。根治方向为统一策略门：作用于工具调用行为，与工具来源无关。
 
 ---
 
@@ -144,8 +144,9 @@ benchmarks/               注入基准 × 能力基准（共享隔离流水线�
 
 ## 🗺️ Roadmap
 
-- **高危写操作审批门**：根治当前唯一真实落地的"受骗的合法写"（jail_010）——写入命令本身合法，提示层无法区分受骗与授权，改为工具层风险分级 + 执行前审批
-- **Reflector（结果核对层）**：agent 声明"已完成"时核对工具轨迹与落盘终态——针对 golden 9 败中的 5 条（谎报 3、凭空内容写入 1、时间解析不自纠 1）
+- **会话引擎（回合驱动地基）**：把散在 TUI 与基准里的"驱动回合 + 解析轨迹"收成一个模块，对外只发四种回合事件（tool_call / tool_result / reply / turn_end）——审批交互、Reflector、Web 终端的共同地基；验收为等价性（双基准数字不变、终端行为不变）
+- **高危写操作审批门**：根治当前唯一真实落地的"受骗的合法写"（jail_010）——写入命令本身合法，提示层无法区分受骗与授权，改为工具层风险分级 + 执行前审批（审批交互走会话引擎的事件通道）
+- **Reflector（结果核对层）**：agent 声明"已完成"时核对工具轨迹与落盘终态（挂 turn_end）——针对 golden 9 败中的 5 条（谎报 3、凭空内容写入 1、时间解析不自纠 1）
 - **Web 终端**：浏览器操作界面 + 毁灭性动作审批门（单操作员版优先）
 
 ---
@@ -154,33 +155,85 @@ benchmarks/               注入基准 × 能力基准（共享隔离流水线�
 
 > 前提：Python ≥ 3.10，Windows / macOS / Linux 均可
 
+### 第 1 步 · 安装
+
 ```bash
-# 1. 克隆并安装
+# 克隆项目
 git clone https://github.com/Canyon-Li/AuditronClaw.git
 cd AuditronClaw
-python -m venv .venv
-#    Windows: .venv\Scripts\activate   Unix: source .venv/bin/activate
-pip install -e .   # 国内可加 -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# 2. 配置模型（交互式向导：选提供商 / 填 API Key / 自动连接测试）
+# 安装依赖并注册命令行工具（一步完成）
+pip install -e .   # 国内可加 -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+> 💡 推荐使用虚拟环境：
+> ```bash
+> python -m venv .venv
+> #    Windows: .venv\Scripts\activate   Unix: source .venv/bin/activate
+> pip install -e .
+> ```
+
+### 第 2 步 · 配置模型
+
+**方式一：自动配置向导（推荐）**
+
+```bash
 auditronclaw config
 ```
 
-支持 openai / anthropic / 阿里云 / 腾讯云 / z.ai / 任意 OpenAI 兼容接口，以及 [Ollama](https://ollama.com)（本地部署，无需 Key）。也可跳过向导：复制 `.env.example` 为 `.env` 手动编辑。
+向导依次引导：选提供商 → 填 API Key → 可选 Base URL（代理/兼容接口）→ 自动测试连接。支持 openai / anthropic / 阿里云 / 腾讯云 / z.ai / 任意 OpenAI 兼容接口，以及 [Ollama](https://ollama.com)（本地部署，无需 Key）。
 
-装技能：放入 `workspace/office/skills/<技能名>/SKILL.md`（兼容 OpenClaw / Claude Code 技能格式），支持热更新，无需重启。
-
-邮箱事务台（心跳引擎驱动的每日"读取 → 分类总结 → 待办落盘 → 飞书推送"流水线）：部署清单见 [docs/deploy/mailbox-desk.md](docs/deploy/mailbox-desk.md)。
+**方式二：手动配置**
 
 ```bash
-# 3. 启动主程序（--thread 可选，隔离会话历史/画像/日志）
-auditronclaw run
+cp .env.example .env   # 然后编辑 .env 填入提供商与 Key，效果等同向导
+```
 
-# 4. 监控终端（另开一个终端；run 用了 --thread 时，这里传同名参数才能看到对应日志流）
+### 第 3 步 · 运行
+
+```bash
+auditronclaw run
+# 可选：--thread <名字> 隔离会话历史/画像/日志（默认 local_geek_master）
+```
+
+### 第 4 步 · 基本用法
+
+直接用自然语言对话，它会自动选择工具：
+
+| 类型 | 示例 |
+|---|---|
+| 时间查询 | 现在几点了？ |
+| 数学计算 | (123.45 + 678.9) × 2 等于多少 |
+| 定时任务 | 5 分钟后提醒我喝水 / 每周一早 9 点提醒我写周报 |
+| 任务管理 | 查看我的定时任务 / 把 1 号任务改到 10 点 / 删除 2 号任务 |
+| 文件操作 | 列出 office 里的文件 / 读取 notes/todo.md / 把"买猫粮"追加到 notes/todo.md |
+| Shell 命令 | 在 office 里执行 ls -la |
+| 记住偏好 | 记住：我喜欢简洁的回复 |
+| 退出 | /exit |
+
+文件与 shell 操作只在 `workspace/office/` 沙盒内生效，白名单外的命令会被拒绝并留审计。
+
+### 第 5 步 · 监控终端与审计日志
+
+想看它"具体干了什么"，两条路：
+
+```bash
+# 实时：另开一个终端，彩色事件流（run 用了 --thread 时，这里传同名参数）
 auditronclaw monitor
 
-# 基准复现（前置：完成第 2 步配置；95 条用例会真实调用模型 API，产生少量开销，
-# 可用 --model / --provider 覆盖默认值）
+# 事后：翻审计日志，一行一个 JSON——tool_call 含完整参数，tool_result 含返回，
+# ai_message 是它对你说的话；核验"说干了是不是真干了"就看这两条
+tail -f logs/local_geek_master.jsonl
+grep '"event": "tool_call"' logs/local_geek_master.jsonl | tail -20
+```
+
+### 进阶
+
+- 装技能：放入 `workspace/office/skills/<技能名>/SKILL.md`（兼容 OpenClaw / Claude Code 技能格式），支持热更新，无需重启
+- 邮箱事务台（每日"读取 → 分类总结 → 待办落盘 → 飞书推送"流水线）：部署与使用见 [docs/deploy/mailbox-desk.md](docs/deploy/mailbox-desk.md)
+- 基准复现（前置：完成第 2 步配置；95 条用例会真实调用模型 API，产生少量开销，可用 `--model` / `--provider` 覆盖默认值）：
+
+```bash
 python benchmarks/run_injection_bench.py
 python benchmarks/run_golden_eval.py
 ```
@@ -190,6 +243,7 @@ python benchmarks/run_golden_eval.py
 - **配置向导没反应 / 无法交互**：直接 `cp .env.example .env` 手动填写，效果等同。
 - **openai / anthropic 直连超时**：在向导中填写代理 Base URL，或改用国内 OpenAI 兼容接口（阿里云 / 腾讯云 / z.ai）。
 - **基准跑一次开销多大**：95 条用例逐条真实调用模型，费用取决于所选模型，建议先用低价模型（如 glm-4-flash）跑通流程。
+- **`auditronclaw` 命令不存在 / venv 里没有 pip**：个别环境下建出的 venv 不带 pip，先 `.venv/Scripts/python -m ensurepip --upgrade` 再重跑 `pip install -e .`；或跳过注册，直接 `.venv/Scripts/python -m entry.cli run`，效果等同。
 
 ---
 
