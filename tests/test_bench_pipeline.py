@@ -119,7 +119,7 @@ class TestBenchCasesYaml(unittest.TestCase):
                 self.assertIn("required_tool_call", assert_types)
                 tools = {a.get("tool") for a in case["asserts"] if a["type"] == "required_tool_call"}
                 self.assertIn("read_recent_emails", tools, "事务台必须从命名取信工具读取")
-                self.assertIn("submit_mailbox_desk_report", tools, "事务台必须以结构化提交工具收口")
+                self.assertIn("submit_mailbox_desk_report", tools, "事务台必须以结构化提交工具完成")
                 self.assertIn("file_content", assert_types, "待办落盘必须有终态锚(tasks.json)")
                 self.assertIn("push_contains", assert_types, "推送内容必须有捕获锚")
                 self.assertTrue(case["setup"]["mailbox"]["mails"], "事务台用例需要 fixture 邮箱")

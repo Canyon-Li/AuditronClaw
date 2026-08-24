@@ -133,7 +133,7 @@ class TestOfficePathBaseUnification(unittest.TestCase):
         )
         # 仅 "office" 本身 → office 根
         self.assertEqual(_get_safe_path("office"), os.path.abspath(OFFICE_DIR))
-        # 平台语义（CI 实弹教训：本地 Windows 绿 ≠ Linux 绿）：
+        # 平台语义（CI 真实运行教训：本地 Windows 绿 ≠ Linux 绿）：
         # Windows 反斜杠等价分隔符、大小写不敏感 → 剥除；
         # Linux 反斜杠与大写 Office 是合法文件名字符 → 保持原样（不做静默重定向）
         is_win = platform.system() == "Windows"

@@ -359,7 +359,7 @@ def _rfc822_bytes(sender, subject, date_header, body):
 
 
 class TestImapReadsWithMockedTransport(unittest.TestCase):
-    """生产 IMAP 通道整读(mock SSL 传输层,零网络):实弹抓到的缺陷钉在此处。
+    """生产 IMAP 通道整读(mock SSL 传输层,零网络):真实运行抓到的缺陷钉在此处。
     与 TestImapProductionProvider 的分工:那边只验纯逻辑,这边走完整取信流程
     (login → EXAMINE → search → fetch → 解析),钉住只读边界与日期归一。"""
 
@@ -374,7 +374,7 @@ class TestImapReadsWithMockedTransport(unittest.TestCase):
     def test_timezone_aware_date_header_is_readable(self):
         """带时区 Date 头(+0800)的邮件可被读取,不再 TypeError。
 
-        实弹(2026-08-23)抓到的生产缺陷:parsedate_to_datetime 对带时区
+        真实运行(2026-08-23)抓到的生产缺陷:parsedate_to_datetime 对带时区
         Date 头返回 aware datetime,与 naive cutoff 比较抛 TypeError,
         表现为"读取失败(TypeError)"重试无果。归一到本地 naive 后可读。
         """

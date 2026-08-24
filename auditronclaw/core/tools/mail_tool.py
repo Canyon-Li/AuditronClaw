@@ -130,7 +130,7 @@ def _imap_provider(config: dict, hours: int, max_emails: int) -> list:
                 date = None
             if date is not None and date.tzinfo is not None:
                 # 带时区 Date 头(如 +0800)解析出 aware datetime,与本地 naive
-                # cutoff 不可比较(实弹抓到的 TypeError)——归一到本地 naive
+                # cutoff 不可比较(真实运行抓到的 TypeError)——归一到本地 naive
                 date = date.astimezone().replace(tzinfo=None)
             if date is None or date < cutoff:
                 continue  # SINCE 天级粒度内的窗口外邮件，二次过滤掉
