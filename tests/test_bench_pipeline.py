@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'benchmarks')))
@@ -9,6 +10,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 import yaml
 
 import bench_pipeline
+from helpers import FakeSender, InjectedProvider, InjectedSender
 
 
 MAILBOX_SPEC = {
@@ -48,15 +50,36 @@ class TestMailboxFixtureSeam(unittest.TestCase):
                     self.assertIn("成功", receipt)
                     self.assertEqual(capture.pushes, ["日报测试文本"])
 
-            # 退出后从外部行为探针验证还原(不触私有字段):
-            # 1. 环境还原原值;2. fixture 邮箱不再可读(邮箱回到"凭据未配置"的
-            #    前置检查——真实 IMAP 通道不会读到测试账单);3. 推送不再进捕获器
+            # 退出后从外部行为探针验证还原(不触私有字段,零真实网络):探针经注入的
+            # 新假件走一遍,证明 fixture 通道已脱钩——生产通道绝不触达(conftest
+            # 哨兵把守,触碰即红)。占位凭据只骗过"未配置不碰网络"的前置检查,
+            # 让探针在有无 .env 的环境里行为一致。
+            # 1. 环境还原原值;2. fixture 邮箱通道脱钩(读到新 provider 的探针
+            #    邮件,而非 fixture 账单);3. 推送通道脱钩(进新 sender,不进旧捕获器)
             self.assertEqual(os.environ["MAIL_ACCOUNT"], saved["MAIL_ACCOUNT"])
-            outside = read_recent_emails.invoke({"hours": 24, "max_emails": 10})
-            self.assertNotIn("账单", outside)
-            n_pushes = len(capture.pushes)
-            send_feishu_summary.invoke({"summary_text": "退出后不应捕获"})
-            self.assertEqual(len(capture.pushes), n_pushes)
+
+            def probe_provider(config, hours, max_emails):
+                return [{"sender": "probe@example.com", "subject": "还原探针邮件",
+                         "date": None, "body": "probe"}]
+
+            probe_sender = FakeSender()
+            probe_env = {
+                "MAIL_ACCOUNT": "probe@placeholder.local",
+                "MAIL_IMAP_PASSWORD": "probe-placeholder",
+                "FEISHU_WEBHOOK_URL": "https://open.feishu.cn/probe-placeholder",
+            }
+            with patch.dict(os.environ, probe_env), \
+                 InjectedProvider(probe_provider), InjectedSender(probe_sender):
+                outside = read_recent_emails.invoke({"hours": 24, "max_emails": 10})
+                self.assertIn("还原探针邮件", outside)
+                self.assertNotIn("账单", outside)
+
+                n_pushes = len(capture.pushes)
+                send_feishu_summary.invoke({"summary_text": "退出后通道还原探针"})
+                self.assertEqual(len(probe_sender.sent), 1)
+                self.assertEqual(probe_sender.sent[0][1]["content"]["text"],
+                                 "退出后通道还原探针")
+                self.assertEqual(len(capture.pushes), n_pushes)
         finally:
             for k, v in old_env.items():
                 if v is None:
