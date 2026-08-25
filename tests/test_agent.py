@@ -23,9 +23,9 @@ class TestAgent(unittest.TestCase):
         self.assertEqual(initial_state["messages"], [])
         self.assertEqual(initial_state["summary"], "")
 
-    @patch('auditronclaw.core.provider.get_provider')
-    @patch('auditronclaw.core.skill_loader.load_dynamic_skills')
-    @patch('auditronclaw.core.tools.builtins.BUILTIN_TOOLS', [])
+    @patch('auditronclaw.core.agent.get_provider')
+    @patch('auditronclaw.core.agent.load_dynamic_skills')
+    @patch('auditronclaw.core.agent.BUILTIN_TOOLS', [])
     def test_create_agent_app_basic(self, mock_load_skills, mock_get_provider):
         """测试创建基础代理应用（带 Mock）"""
         from auditronclaw.core.agent import create_agent_app
@@ -46,9 +46,9 @@ class TestAgent(unittest.TestCase):
             print(f"Unexpected error: {e}")
             raise
 
-    @patch('auditronclaw.core.provider.get_provider')
-    @patch('auditronclaw.core.skill_loader.load_dynamic_skills')
-    @patch('auditronclaw.core.tools.builtins.BUILTIN_TOOLS', [])
+    @patch('auditronclaw.core.agent.get_provider')
+    @patch('auditronclaw.core.agent.load_dynamic_skills')
+    @patch('auditronclaw.core.agent.BUILTIN_TOOLS', [])
     def test_create_agent_app_with_custom_tools(self, mock_load_skills, mock_get_provider):
         """测试创建带有自定义工具的代理应用（带 Mock）"""
         from auditronclaw.core.agent import create_agent_app
@@ -138,9 +138,9 @@ class TestAgent(unittest.TestCase):
             self.assertEqual(len(dups), 1, "同名只保留一个")
             self.assertEqual(dups[0].description, "extra version", "外接版本胜出")
 
-    @patch('auditronclaw.core.provider.get_provider')
-    @patch('auditronclaw.core.skill_loader.load_dynamic_skills')
-    @patch('auditronclaw.core.tools.builtins.BUILTIN_TOOLS', [])
+    @patch('auditronclaw.core.agent.get_provider')
+    @patch('auditronclaw.core.agent.load_dynamic_skills')
+    @patch('auditronclaw.core.agent.BUILTIN_TOOLS', [])
     def test_create_agent_app_with_checkpointer(self, mock_load_skills, mock_get_provider):
         """测试创建带有检查点的代理应用（带 Mock）"""
         from auditronclaw.core.agent import create_agent_app

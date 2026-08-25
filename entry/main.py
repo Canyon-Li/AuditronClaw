@@ -3,7 +3,6 @@ import sys
 import time
 import asyncio
 import random
-from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from prompt_toolkit import PromptSession, print_formatted_text
@@ -13,6 +12,7 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.application import get_app
 
 from auditronclaw.core.agent import create_agent_app
+from auditronclaw.core.session import SessionEngine, ToolCall, ToolResult, Reply, TurnEnd
 from auditronclaw.core.config import DB_PATH
 from auditronclaw.core.bus import task_queue
 from auditronclaw.core.heartbeat import pacemaker_loop
@@ -87,6 +87,36 @@ def cprint(text="", end="\n"):
     print_formatted_text(ANSI(str(text)), end=end)
 
 
+def handle_turn_event(event, spinner):
+    """回合事件 → TUI 行为映射(spinner 状态机与打印,消费 SessionEngine 事件流)。
+
+    与旧 astream 手写解析逐分支等价(等价性由 tests/test_tui_adapter.py 钉住):
+    tool_call→工具态+打印工具名;tool_result→回思考态;final reply→停
+    spinner+打印;非 final reply 不显示(保现状);turn_end→行距收尾。
+    """
+    if isinstance(event, ToolCall):
+        spinner.is_tool_calling = True
+        spinner.tool_msg = f"唤醒内置工具 : {event.name}..."
+        cprint(f"  ●\033[38;5;51m Tool Call: \033[0m{event.name}")
+        cprint('')
+    elif isinstance(event, ToolResult):
+        spinner.is_tool_calling = False
+    elif isinstance(event, Reply):
+        if event.final:
+            spinner.is_spinning = False
+
+            lines = event.content.strip().split('\n')
+            if lines:
+                formatted_out = f"  \033[38;5;141m❯\033[0m \033[38;5;250m{lines[0]}"
+                for line in lines[1:]:
+                    formatted_out += f"\n    {line}"
+                formatted_out += "\033[0m"
+                cprint(formatted_out)
+    elif isinstance(event, TurnEnd):
+        spinner.is_spinning = False
+        cprint() # 空出舒适的行距
+
+
 async def async_main(thread_id: str = "local_geek_master"):
     print_banner()
 
@@ -99,7 +129,7 @@ async def async_main(thread_id: str = "local_geek_master"):
 
     async with AsyncSqliteSaver.from_conn_string(DB_PATH) as memory:
         app = create_agent_app(provider_name=current_provider, model_name=current_model, checkpointer=memory, thread_id=thread_id)
-        config = {"configurable": {"thread_id": thread_id}}
+        engine = SessionEngine(app, thread_id)
 
         class SpinnerState:
             action_words = [
@@ -152,48 +182,23 @@ async def async_main(thread_id: str = "local_geek_master"):
                 if user_input.lower() in ["/exit", "/quit"]:
                     task_queue.task_done()
                     break
-                
+
                 spinner.current_words = spinner.action_words.copy()
                 random.shuffle(spinner.current_words)
-                
+
                 spinner.start_time = time.time()
                 spinner.is_spinning = True
                 spinner.is_tool_calling = False
-                
-                inputs = {"messages": [HumanMessage(content=user_input)]}
+
                 try:
-                    async for event in app.astream(inputs, config=config, stream_mode="updates"):
-                        for node_name, node_data in event.items():
-                            if node_name == "agent":
-                                last_msg = node_data["messages"][-1]
-                                
-                                if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-                                    for tc in last_msg.tool_calls:
-                                        spinner.is_tool_calling = True
-                                        spinner.tool_msg = f"唤醒内置工具 : {tc['name']}..."
-                                        cprint(f"  ●\033[38;5;51m Tool Call: \033[0m{tc['name']}")
-                                        cprint('')
-                                        
-                                elif last_msg.content:
-                                    spinner.is_spinning = False
-                                    
-                                    lines = last_msg.content.strip().split('\n')
-                                    if lines:
-                                        formatted_out = f"  \033[38;5;141m❯\033[0m \033[38;5;250m{lines[0]}"
-                                        for line in lines[1:]:
-                                            formatted_out += f"\n    {line}"
-                                        formatted_out += "\033[0m" 
-                                        cprint(formatted_out)
-                                    
-                            elif node_name != "agent": 
-                                spinner.is_tool_calling = False 
-                                
+                    async for event in engine.run_turn(user_input):
+                        handle_turn_event(event, spinner)
                 except Exception as e:
                     spinner.is_spinning = False
                     cprint(f"  \033[31m[ ⚠️ 引擎异常 : {e} ]\033[0m")
+                    cprint() # 空出舒适的行距
 
                 spinner.is_spinning = False
-                cprint() # 空出舒适的行距
                 task_queue.task_done()
 
         async def user_input_loop():
