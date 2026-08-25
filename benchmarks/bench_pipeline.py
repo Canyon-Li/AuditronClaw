@@ -2,8 +2,8 @@
 基准流水线(bench_pipeline):注入基准与 golden eval 共用的用例处理管线。
 
 每条用例流过六个工位:
-    隔离(reload 链切 workspace)→ 预置材料(setup.write)→ 驱动(astream 跑 agent)
-    → 收集(轨迹结构化)→ 判定(交给各 runner,断言语义不同)→ 落盘(JSONL)
+    隔离(reload 链切 workspace)→ 预置材料(setup.write)→ 驱动(会话引擎跑 agent 回合)
+    → 收集(回合轨迹组装结果 dict)→ 判定(交给各 runner,断言语义不同)→ 落盘(JSONL)
 
 职责边界:
 - runner 负责"跑哪些用例 + 怎么判定"
@@ -24,13 +24,16 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from contextlib import contextmanager
 
-from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 # 项目根加入 sys.path(benchmarks/ 不是包)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+# session 不在 reload 链上(收 app 为参数、不 import agent),顶层 import 的
+# 绑定不会被 reload 刷新;agent 仍须函数内 import 才能拿到重载后的新绑定。
+from auditronclaw.core.session import SessionEngine, TurnEnd
 
 from dotenv import load_dotenv
 
@@ -149,7 +152,12 @@ async def run_case(case: dict, model_name: str, provider_name: str,
 
 async def _drive_agent(case: dict, workspace: str, model_name: str,
                        provider_name: str, thread_prefix: str, pushes: list) -> dict:
-    """驱动 agent 跑完 trigger 并结构化轨迹(pipeline 的执行工位,与 setup 工位分离)。"""
+    """驱动 agent 跑完 trigger 并结构化轨迹(pipeline 的执行工位,与 setup 工位分离)。
+
+    引擎适配器:驱动与事件解析归 SessionEngine(语义钉在 session.py),本函数
+    只建 app、跑一个回合,从 turn_end 搭载的回合轨迹组装基准结果 dict——
+    形状与语义由表征测试(tests/test_bench_adapter_characterization.py)逐字段钉死。
+    """
     case_id = case["id"]
     from auditronclaw.core.agent import create_agent_app
 
@@ -160,33 +168,22 @@ async def _drive_agent(case: dict, workspace: str, model_name: str,
         checkpointer=MemorySaver(),
         thread_id=thread_id,
     )
-    config = {"configurable": {"thread_id": thread_id}}
 
-    tool_calls = []      # [{tool, args}]
-    tool_results = []    # [{tool, result}] 与 tool_calls 按序对应(ToolNode 串行回填)
-    reply_text = []      # 非 tool 消息文本
-
-    inputs = {"messages": [HumanMessage(content=case["trigger"])]}
-    async for event in app.astream(inputs, config=config, stream_mode="updates"):
-        for _node, node_data in event.items():
-            for msg in node_data.get("messages", []):
-                if getattr(msg, "tool_calls", None):
-                    for tc in msg.tool_calls:
-                        tool_calls.append({"tool": tc["name"], "args": tc.get("args", {})})
-                if getattr(msg, "type", "") == "tool":
-                    tool_results.append({"tool": msg.name, "result": str(msg.content)})
-                elif msg.content:
-                    reply_text.append(str(msg.content))
-
-    return {
-        "case_id": case_id,
-        "surface": case["surface"],
-        "workspace": workspace,
-        "tool_calls": tool_calls,
-        "tool_results": tool_results,
-        "reply": "\n".join(reply_text),
-        "pushes": pushes,
-    }
+    engine = SessionEngine(app, thread_id)
+    # 基准是批处理消费者:只吃 turn_end 搭载的聚合轨迹;逐事件流(含未来的
+    # approval_request)归交互式适配器(TUI/Web),本工位不消费
+    async for event in engine.run_turn(case["trigger"]):
+        if isinstance(event, TurnEnd):
+            trajectory = event.trajectory
+            return {
+                "case_id": case_id,
+                "surface": case["surface"],
+                "workspace": workspace,
+                "tool_calls": trajectory.tool_calls,
+                "tool_results": trajectory.tool_results,
+                "reply": trajectory.reply,
+                "pushes": pushes,
+            }
 
 
 # ============ 结果落盘 ============

@@ -11,8 +11,6 @@ from .config import MEMORY_DIR
 from .skill_loader import load_dynamic_skills
 from langchain_core.runnables import RunnableConfig
 import os
-from prompt_toolkit import print_formatted_text
-from prompt_toolkit.formatted_text import ANSI
 
 # ============ 系统提示词（保密性改造：敏感段与用户内容分段隔离） ============
 #
@@ -132,8 +130,12 @@ def create_agent_app(
         state_updates = {}
 
         if discarded_msgs:
-            import sys
-            print_formatted_text(ANSI("\033[K \033[38;5;141m ● 正在更新上下文记忆... \033[0m"))
+            # core 零 UI 依赖:观测走审计事件(monitor 渲染 system_action),不走 TUI print
+            audit_logger.log_event(
+                thread_id=thread_id,
+                event="system_action",
+                content="正在更新上下文记忆...",
+            )
             discarded_text = "\n".join([f"{m.type}: {m.content}" for m in discarded_msgs if m.content])
         
             summary_prompt = (
