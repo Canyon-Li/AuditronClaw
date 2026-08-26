@@ -95,7 +95,7 @@ _Avoid_: 常驻循环、消息泵
 _Avoid_: 轮询、请求
 
 **回合事件**:
-会话引擎对外发出的类型化事件，四种：tool_call / tool_result / reply / turn_end。审批通道（approval_request）声明在接口上，产生与续行由策略层实现。
+会话引擎对外发出的类型化事件，五种：tool_call / tool_result / reply / approval_request / turn_end。approval_request 由审批门在人来源回合经 interrupt 产生，答案 ApprovalDecision 续行同回合；心跳与基准来源构造上不产生。
 _Avoid_: 消息、日志（那是审计流的词）
 
 **回合轨迹**:

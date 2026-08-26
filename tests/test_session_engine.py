@@ -240,14 +240,14 @@ class TestExceptionPropagates(unittest.TestCase):
 
 
 class TestEventInterface(unittest.TestCase):
-    """事件类型接口钉子:frozen dataclass + TurnEvent 子类 + approval_request 占位。"""
+    """事件类型接口钉子:frozen dataclass + TurnEvent 子类(审批打断事件含字段)。"""
 
     def test_all_event_types_are_frozen_turn_events(self):
         samples = [
             ToolCall(name="t", args={}),
             ToolResult(tool="t", result="r"),
             Reply(content="c", final=True),
-            ApprovalRequest(),
+            ApprovalRequest(tool="t", args={}, risk_class="write", reason="r"),
             TurnEnd(trajectory=TurnTrajectory([], [], "")),
         ]
         for ev in samples:

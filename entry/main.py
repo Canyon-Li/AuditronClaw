@@ -13,8 +13,8 @@ from prompt_toolkit.application import get_app
 
 from auditronclaw.core.agent import create_agent_app
 from auditronclaw.core.session import SessionEngine, ToolCall, ToolResult, Reply, TurnEnd
-from auditronclaw.core.config import DB_PATH
-from auditronclaw.core.bus import task_queue
+from auditronclaw.core.approval.gate import TurnOrigin
+from auditronclaw.core.bus import task_queue, TurnRequest
 from auditronclaw.core.heartbeat import pacemaker_loop
 
 def clear_screen():
@@ -178,10 +178,14 @@ async def async_main(thread_id: str = "local_geek_master"):
 
         async def agent_worker():
             while True:
-                user_input = await task_queue.get()
-                if user_input.lower() in ["/exit", "/quit"]:
+                item = await task_queue.get()
+                # 队列项:类型化 TurnRequest(用户=HUMAN/心跳=HEARTBEAT)或
+                # 裸控制令牌(/exit)。裸串无来源声明→按无人值守(fail-closed)
+                text = item.text if isinstance(item, TurnRequest) else item
+                if text.lower() in ["/exit", "/quit"]:
                     task_queue.task_done()
                     break
+                origin = item.origin if isinstance(item, TurnRequest) else TurnOrigin.UNATTENDED
 
                 spinner.current_words = spinner.action_words.copy()
                 random.shuffle(spinner.current_words)
@@ -191,7 +195,7 @@ async def async_main(thread_id: str = "local_geek_master"):
                 spinner.is_tool_calling = False
 
                 try:
-                    async for event in engine.run_turn(user_input):
+                    async for event in engine.run_turn(text, origin=origin):
                         handle_turn_event(event, spinner)
                 except Exception as e:
                     spinner.is_spinning = False
@@ -235,8 +239,10 @@ async def async_main(thread_id: str = "local_geek_master"):
 
                     padded_bubble = f"  ❯ {user_input}    "
                     cprint(f"\033[48;2;38;38;38m\033[38;5;255m{padded_bubble}\033[0m\n")
-                    
-                    await task_queue.put(user_input)
+
+                    # 终端输入是人在场:来源 HUMAN(可问人;审批交互面归 04 票)
+                    await task_queue.put(TurnRequest(text=user_input,
+                                                     origin=TurnOrigin.HUMAN))
                     if user_input.lower() in ["/exit", "/quit"]:
                         cprint("  \033[38;5;141m✦ 记忆已固化，AuditronClaw 进入休眠。\033[0m")
                         break

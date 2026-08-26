@@ -357,14 +357,22 @@ class TestPacemakerLoopDailyDeskTask(unittest.TestCase):
         return messages
 
     def test_due_daily_task_drives_pipeline_message_into_queue(self):
-        """到期触发可观测:系统心跳消息进会话队列,携带完整管线指令"""
+        """到期触发可观测:心跳消息以类型化来源进会话队列,携带完整管线指令"""
+        from auditronclaw.core.approval.gate import TurnOrigin
+        from auditronclaw.core.bus import TurnRequest
+
         self._write_due_daily_task()
 
         queue = self._run_pacemaker(seconds=0.3)
 
         fired = self._drain(queue)
         self.assertEqual(len(fired), 1, "到期任务应触发恰好一条系统消息")
-        msg = fired[0]
+        item = fired[0]
+        self.assertIsInstance(item, TurnRequest,
+                              "心跳触发进队列的是类型化回合请求,不是裸字符串")
+        self.assertIs(item.origin, TurnOrigin.HEARTBEAT,
+                      "心跳来源在构造上类型化标记(无人值守,不靠文本前缀)")
+        msg = item.text
         self.assertIn("系统内部心跳触发", msg)
         self.assertIn("邮箱事务台", msg)
         self.assertIn("read_recent_emails", msg, "消息应携带管线指令原文")
