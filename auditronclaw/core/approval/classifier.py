@@ -23,6 +23,7 @@ from ..tools.sandbox_tools import (
     _EXPANSION_PATTERN,
     _SEGMENT_SPLIT_PATTERN,
     _REDIRECTION_TARGET_PATTERN,
+    _normalize_office_path,
     _parse_segment_head,
     _segment_head_name,
 )
@@ -42,11 +43,17 @@ _HAZARD_PRECEDENCE = (RISK_DELETE, RISK_EXECUTE, RISK_WRITE, RISK_DOMAIN_EXTEND,
 
 @dataclass(frozen=True)
 class RiskAssessment:
-    """分级结果:级别 + 人可读依据(审批提示与审计共用)。"""
+    """分级结果:级别 + 目标作用域 + 人可读依据(审批提示与审计共用)。
+
+    targets 是规则匹配的输入(02 票):本次调用副作用落在哪里的 workspace
+    相对路径(office/scripts/run.py、tasks.json、memory/profiles)或域名。
+    提不出目标(纯读、未入册、外接)为空元组——规则无从豁免,不猜。
+    """
 
     tool: str
     risk_class: str
     reason: str
+    targets: tuple = ()
 
     @property
     def requires_approval(self) -> bool:
@@ -95,8 +102,10 @@ class Provenance(str, Enum):
     SKILL = "skill"      # 技能工具:经 execute_office_shell 收敛,按命令判
 
 
-def _assess(tool: str, risk_class: str, reason: str) -> RiskAssessment:
-    return RiskAssessment(tool=tool, risk_class=risk_class, reason=reason)
+def _assess(tool: str, risk_class: str, reason: str,
+            targets: tuple = ()) -> RiskAssessment:
+    return RiskAssessment(tool=tool, risk_class=risk_class, reason=reason,
+                          targets=targets)
 
 
 def classify_tool_call(
@@ -141,6 +150,27 @@ def _write_target(args: Mapping) -> str:
     return "tasks.json 任务队列"
 
 
+def _office_target(rel: str) -> str:
+    """office 相对路径 → workspace 相对目标作用域(规则匹配的命名空间)。
+
+    与执行同源:走同一套 office 路径归一化(剥冗余 office/ 前缀、Windows
+    反斜杠等价),再统一正斜杠、剥 ./ 与 . 段——规则批的落点就是执行的落点。
+    """
+    cleaned = _normalize_office_path(rel).replace("\\", "/")
+    cleaned = "/".join(seg for seg in cleaned.split("/") if seg not in ("", "."))
+    return "office/" + cleaned if cleaned else "office"
+
+
+def _write_targets(tool_name: str, args: Mapping) -> tuple:
+    """写类调用的目标作用域(与 _write_target 同一判定分支)。"""
+    if tool_name == "write_office_file":
+        # filepath 缺失是 schema 违规,工具自身报错;提不出目标则规则不豁免
+        return (_office_target(str(args["filepath"])),) if args.get("filepath") else ()
+    if tool_name == "save_user_profile":
+        return ("memory/profiles",)  # 画像区目录(会话内具体文件由工具自析)
+    return ("tasks.json",)           # 任务队列落盘部(schedule/modify/submit)
+
+
 def _classify_builtin_call(tool_name: str, args: Mapping) -> RiskAssessment:
     if tool_name in _PURE_READ_TOOLS:
         return _assess(tool_name, RISK_READ, "纯读工具,无副作用")
@@ -151,15 +181,18 @@ def _classify_builtin_call(tool_name: str, args: Mapping) -> RiskAssessment:
             return _assess(tool_name, RISK_READ,
                            f"绑定白名单内域名 {domain} 的网络实名工具")
         return _assess(tool_name, RISK_DOMAIN_EXTEND,
-                       f"绑定域名 {domain} 不在白名单内,属白名单扩展流程")
+                       f"绑定域名 {domain} 不在白名单内,属白名单扩展流程",
+                       targets=(domain,))
 
     if tool_name in _WRITE_TOOLS:
         return _assess(tool_name, RISK_WRITE,
-                       f"写类副作用(目标:{_write_target(args)})")
+                       f"写类副作用(目标:{_write_target(args)})",
+                       targets=_write_targets(tool_name, args))
 
     if tool_name in _DELETE_TOOLS:
         return _assess(tool_name, RISK_DELETE,
-                       f"不可逆删除(目标:{args.get('task_id', '未知')})")
+                       f"不可逆删除(目标:{args.get('task_id', '未知')})",
+                       targets=("tasks.json",))
 
     if tool_name in _SHELL_TOOLS:
         return classify_shell_command(tool_name, str(args.get("command", "")))
@@ -179,12 +212,25 @@ _SHELL_WRITE_COMMANDS = frozenset({"mv", "move", "cp", "copy", "mkdir", "md", "t
 _SHELL_DELETE_COMMANDS = frozenset({"rm", "del", "rmdir", "rd"})
 
 
+def _operand_paths(tokens: list) -> list:
+    """段的操作数(非 - 开头的 token),按 office 相对路径视作目标作用域。
+
+    过度收集只会让规则更难命中(fail-closed 方向),不会放行更多;
+    解释器/变更命令的操作数本就要求是 office 内相对路径(命令校验同源)。
+    重定向符号(< >)是 shell 运算符不是路径(Windows 文件名也不允许),
+    其目标已由重定向正则单独收集,此处跳过。
+    """
+    return [tok for tok in tokens[1:]
+            if not tok.lstrip("\"'").startswith("-") and not any(c in tok for c in "<>")]
+
+
 def classify_shell_command(tool_name: str, command: str) -> RiskAssessment:
     """对一条 shell 命令做段级分级(纯判定,不执行)。
 
     与命令校验同源:切段、shlex 首 token、文件名归一化全部复用
     sandbox_tools 的解析 helper——校验要拒的命令不会被分级判成纯读。
     任一段含解释器或重定向即整条必批(jail_010 断链点)。
+    必批段的操作数与重定向目标汇入 targets(规则匹配的输入)。
     """
     if not command or not command.strip():
         return _assess(tool_name, RISK_READ, "空命令,无副作用")
@@ -194,12 +240,13 @@ def classify_shell_command(tool_name: str, command: str) -> RiskAssessment:
         return _assess(tool_name, RISK_UNCLASSIFIED,
                        f"含展开/替换语法,无法按段定级(命令:{command})")
 
-    # 重定向:输出落盘是写副作用,与解释器同门,整条必批
-    if any(_REDIRECTION_TARGET_PATTERN.finditer(command)):
-        return _assess(tool_name, RISK_EXECUTE,
-                       f"含重定向(命令:{command})")
-
     hazards = []  # [(risk_class, 触发段)]
+    targets = []  # 目标作用域(workspace 相对;规则匹配的输入)
+    # 重定向:输出落盘是写副作用,与解释器同门,整条必批
+    for match in _REDIRECTION_TARGET_PATTERN.finditer(command):
+        hazards.append((RISK_EXECUTE, f"重定向→{match.group(1)}"))
+        targets.append(_office_target(match.group(1)))
+
     for segment in _SEGMENT_SPLIT_PATTERN.split(command):
         stripped = segment.strip()
         if not stripped:
@@ -211,24 +258,30 @@ def classify_shell_command(tool_name: str, command: str) -> RiskAssessment:
             return _assess(tool_name, RISK_UNCLASSIFIED,
                            f"命令解析失败,无法按段定级(段:{stripped})")
         if head in _INTERPRETERS:
-            hazards.append((RISK_EXECUTE, stripped))
+            risk = RISK_EXECUTE
         elif head in _SHELL_DELETE_COMMANDS:
-            hazards.append((RISK_DELETE, stripped))
+            risk = RISK_DELETE
         elif head in _SHELL_WRITE_COMMANDS:
-            hazards.append((RISK_WRITE, stripped))
+            risk = RISK_WRITE
         elif head in _SHELL_READ_COMMANDS:
             if head == "find" and _find_has_hazard_flag(tokens):
-                hazards.append((RISK_EXECUTE, stripped))
-            continue
+                risk = RISK_EXECUTE
+            else:
+                continue
         else:
-            hazards.append((RISK_UNCLASSIFIED, stripped))
+            risk = RISK_UNCLASSIFIED
+        hazards.append((risk, stripped))
+        # 必批段(除未入册)的操作数即目标作用域;未入册提不出可信目标,不收
+        if risk != RISK_UNCLASSIFIED:
+            targets.extend(_office_target(t) for t in _operand_paths(tokens))
 
     if not hazards:
         return _assess(tool_name, RISK_READ, "各命令段均为纯读命令")
 
     risk_class = min(hazards, key=lambda h: _HAZARD_PRECEDENCE.index(h[0]))[0]
     triggers = "; ".join(seg for _cls, seg in hazards)
-    return _assess(tool_name, risk_class, f"必批命令段:{triggers}")
+    return _assess(tool_name, risk_class, f"必批命令段:{triggers}",
+                   targets=tuple(targets))
 
 
 def _percent_var_pattern(command: str) -> bool:

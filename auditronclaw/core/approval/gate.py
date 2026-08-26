@@ -29,6 +29,7 @@ from .classifier import (
 EVENT_APPROVAL_REQUESTED = "approval_requested"
 EVENT_APPROVAL_DECISION = "approval_decision"
 EVENT_RULE_PERSISTED = "rule_persisted"
+EVENT_RULE_REVOKED = "rule_revoked"  # 02 票:撤销留痕(管理面,与铸规则对称)
 
 
 class DecisionSource(str, Enum):
@@ -74,15 +75,20 @@ def _log_approval_requested(thread_id: str, tool_name: str, args: dict,
 
 def _log_approval_decision(thread_id: str, tool_name: str,
                            assessment: RiskAssessment, approved: bool,
-                           source: DecisionSource) -> None:
-    audit_logger.log_event(
-        thread_id=thread_id,
-        event=EVENT_APPROVAL_DECISION,
-        tool=tool_name,
-        approved=approved,
-        source=source.value,
-        risk_class=assessment.risk_class,
-    )
+                           source: DecisionSource,
+                           rule_id: Optional[str] = None) -> None:
+    event = {
+        "thread_id": thread_id,
+        "event": EVENT_APPROVAL_DECISION,
+        "tool": tool_name,
+        "approved": approved,
+        "source": source.value,
+        "risk_class": assessment.risk_class,
+    }
+    if rule_id is not None:
+        # 命中规则的决定带 rule_id:事后能核"是哪条规则放的行"(仅规则路径携带)
+        event["rule_id"] = rule_id
+    audit_logger.log_event(**event)
 
 
 def log_rule_persisted(thread_id: str, rule: dict) -> None:
@@ -92,6 +98,21 @@ def log_rule_persisted(thread_id: str, rule: dict) -> None:
         event=EVENT_RULE_PERSISTED,
         rule=rule,
     )
+
+
+def log_rule_revoked(thread_id: str, rule: dict) -> None:
+    """规则撤销事件(批错的规则有回头路,回头路本身可查)。"""
+    audit_logger.log_event(
+        thread_id=thread_id,
+        event=EVENT_RULE_REVOKED,
+        rule=rule,
+    )
+
+
+def _rule_id(rule) -> Optional[str]:
+    """从命中的规则取 id(兼容 dict 与 ApprovalRule 两种载体),进决定事件。"""
+    rid = rule.get("id") if isinstance(rule, dict) else getattr(rule, "id", None)
+    return str(rid) if rid is not None else None
 
 
 def wrap_tool(
@@ -117,7 +138,8 @@ def wrap_tool(
             if rule_matcher is not None else None
         if rule is not None:
             _log_approval_decision(thread_id, tool.name, assessment,
-                                   approved=True, source=DecisionSource.RULE_AUTO)
+                                   approved=True, source=DecisionSource.RULE_AUTO,
+                                   rule_id=_rule_id(rule))
             return True, None
 
         # 无人形态(01 票):无规则且无应答通道 → 拒绝并继续。

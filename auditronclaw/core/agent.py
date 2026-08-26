@@ -7,6 +7,7 @@ from .context import AgentState, trim_context_messages
 from .provider import get_provider
 from .tools.builtins import BUILTIN_TOOLS, create_profile_tool
 from .approval.gate import wrap_all_tools
+from .approval.rules import RuleStore, make_rule_matcher
 from .logger import audit_logger
 from .config import MEMORY_DIR
 from .skill_loader import load_dynamic_skills
@@ -100,9 +101,13 @@ def create_agent_app(
         extra_names = frozenset(t.name for t in extra_tools)
 
     # 审批门:所有注册工具(内置/技能/外接)的调用必经"分级 → 规则 → 问人"
-    # 固定链。当前无人形态:无规则且无应答通道的高危调用拒绝并继续。
+    # 固定链。规则是高危的唯一豁免通道:规则文件在 workspace 级、office 外
+    # (agent 写面够不着自己的规则),每次匹配即时读盘,铸规则/撤销当次生效。
+    # 当前无人形态:无规则且无应答通道的高危调用拒绝并继续(问人归 03 票)。
+    rule_store = RuleStore()
     gated_tools = wrap_all_tools(actual_tools, thread_id=thread_id,
-                                 extra_names=extra_names)
+                                 extra_names=extra_names,
+                                 rule_matcher=make_rule_matcher(rule_store))
 
     tool_node = ToolNode(gated_tools)
 

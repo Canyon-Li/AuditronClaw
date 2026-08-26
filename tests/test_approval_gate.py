@@ -9,6 +9,7 @@
 """
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -160,7 +161,7 @@ class TestParsingSameSource(unittest.TestCase):
         for name in ("_parse_segment_head", "_segment_head_name",
                      "_SEGMENT_SPLIT_PATTERN", "_REDIRECTION_TARGET_PATTERN",
                      "_EXPANSION_PATTERN", "_CMD_VAR_PATTERN", "_INTERPRETERS",
-                     "_FIND_HAZARD_FLAGS"):
+                     "_FIND_HAZARD_FLAGS", "_normalize_office_path"):
             with self.subTest(symbol=name):
                 self.assertIs(getattr(classifier, name), getattr(sandbox_tools, name),
                               f"分级器不得自带 {name} 副本——与命令校验同源")
@@ -499,6 +500,12 @@ class TestUnattendedRejectionContinues(unittest.TestCase):
         with ExitStack() as stack:
             audit_mock = stack.enter_context(
                 patch('auditronclaw.core.approval.gate.audit_logger'))
+            # 钉死规则文件到空路径:装配点已接真实 matcher(02 票),
+            # 本测试断言的是无人拒,不得被开发机本地规则文件串扰
+            stack.enter_context(patch(
+                'auditronclaw.core.approval.rules.APPROVAL_RULES_FILE',
+                os.path.join(tempfile.mkdtemp(prefix="gate_unattended_"),
+                             "approval_rules.json")))
             stack.enter_context(patch('auditronclaw.core.agent.get_provider',
                                       return_value=ScriptedLLM(script)))
             stack.enter_context(patch('auditronclaw.core.agent.load_dynamic_skills',
