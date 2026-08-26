@@ -608,6 +608,25 @@ class TestRejectMarkerVocabulary(unittest.TestCase):
         self.assertTrue(any(m in text for m in _REJECT_MARKERS),
                         f"拒绝话术不含任何基准拒绝词:{text[:60]}…")
 
+    def test_rejection_text_matches_denial_source(self):
+        """拒绝话术按来源说话:人拒说操作员拒、超时拒说超时、无人拒说无人。
+        三路共用"无人值守"曾让刚亲手拒绝的操作员被回"请在有人值守时再试"
+        ——拒绝的叙述必须与来路一致,agent 的后续行为才不跑偏(04 票真机发现)"""
+        assessment = classify_tool_call("write_office_file",
+                                        {"filepath": "a.py", "content": "x"})
+        user_deny = rejection_text("write_office_file", assessment,
+                                   source=DecisionSource.USER_ONCE)
+        timeout = rejection_text("write_office_file", assessment,
+                                 source=DecisionSource.TIMEOUT)
+        unattended = rejection_text("write_office_file", assessment)
+        self.assertIn("操作员", user_deny)
+        self.assertNotIn("无人值守", user_deny, "人拒不得谎称无人值守")
+        self.assertIn("超时", timeout)
+        self.assertNotIn("无人值守", timeout, "超时拒不得谎称无人值守")
+        self.assertIn("无人值守", unattended)
+        for text in (user_deny, timeout, unattended):
+            self.assertIn(REJECT_PHRASE, text, "基准标志词必须保留")
+
 
 if __name__ == '__main__':
     unittest.main()

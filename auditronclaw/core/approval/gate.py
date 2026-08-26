@@ -97,14 +97,23 @@ def ensure_decision(value) -> ApprovalDecision:
 REJECT_PHRASE = "审批门拒绝"
 
 
-def rejection_text(tool_name: str, assessment: RiskAssessment) -> str:
-    """无人形态拒绝话术:带原因、点名具体动作,作为 tool_result 返回。"""
-    return (
-        f"❌ {REJECT_PHRASE}：工具 {tool_name} 的本次调用属于必批副作用"
-        f"（{assessment.risk_class}：{assessment.reason}）。"
-        "当前无人值守且无匹配审批规则，本次调用未执行。"
-        "如属日常合法操作，请在有人交互时批准或铸审批规则后再试。"
-    )
+def rejection_text(tool_name: str, assessment: RiskAssessment,
+                   source: DecisionSource = DecisionSource.UNATTENDED) -> str:
+    """拒绝话术:带原因、点名具体动作,作为 tool_result 返回。
+
+    按决定来源说话(04 票手工验收发现):人拒、超时拒、无人拒曾共用一句
+    "无人值守",刚亲手拒绝的操作员被回"请在有人值守时再试"——拒绝的
+    叙述必须与来路一致,agent 的后续行为才不跑偏。
+    """
+    head = (f"❌ {REJECT_PHRASE}：工具 {tool_name} 的本次调用属于必批副作用"
+            f"（{assessment.risk_class}：{assessment.reason}）。")
+    if source == DecisionSource.USER_ONCE:
+        return head + "操作员已明确拒绝本次调用，未执行。请调整方案或与操作员确认后再试。"
+    if source == DecisionSource.TIMEOUT:
+        return (head + "审批等待超时（无人应答），已按拒绝处理，本次调用未执行。"
+                "如确属日常合法操作，请在场及时应答或铸审批规则后再试。")
+    return (head + "当前无人值守且无匹配审批规则，本次调用未执行。"
+            "如属日常合法操作，请在有人交互时批准或铸审批规则后再试。")
 
 
 # 规则匹配器契约(02 票实现,此处只定签名):
@@ -244,7 +253,7 @@ def wrap_tool(
                 if decision.persist:
                     _mint_persist_rules(rule_store, thread_id, assessment)
                 return True, None
-            return False, rejection_text(tool.name, assessment)
+            return False, rejection_text(tool.name, assessment, decision.source)
 
         # 无人(心跳/基准/未声明来源):无规则且不问人 → 拒绝并继续
         _log_approval_requested(thread_id, tool.name, kwargs, assessment)

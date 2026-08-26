@@ -113,9 +113,10 @@ def cprint(text="", end="\n"):
 # 输入冲突的确定行为:主提示提交的行永远排队成下一回合(哪怕此刻审批正
 # 挂起),审批答案只来自审批提示——两条通路互不吃对方的输入。审批请求块
 # 由 handle_turn_event 在事件流里到达即打印(patch_stdout 护行),状态条以
-# bridge.pending 提示"审批等待应答"。引擎超时掐死应答器时 future 已死,
-# 应答步跳过死条目不问人(超时即终局拒绝);输入循环退出时 close() 把挂起
-# 审批一律按无人拒,回合必能收口(单 worker 队列不被悬而未决的审批挂死)。
+# bridge.pending 提示"审批等待应答"。引擎超时掐死应答器时 future 即死,
+# 死条目即时出桥(状态条同拍收回,不等操作员下次提交);输入循环退出时
+# close() 把挂起审批一律按无人拒,回合必能收口(单 worker 队列不被悬而
+# 未决的审批挂死)。
 
 _APPROVAL_ALIASES = {
     "y": (True, False), "yes": (True, False),
@@ -198,32 +199,37 @@ class ApprovalBridge:
     """
 
     def __init__(self):
-        self._inbox: asyncio.Queue = asyncio.Queue()
+        self._entries: List[Tuple[ApprovalRequest, asyncio.Future]] = []
 
     @property
     def pending(self) -> bool:
-        """是否有挂起未决的审批(状态条提示用)。"""
-        return not self._inbox.empty()
+        """是否有挂起未决的审批(状态条提示用)。死条目即时出桥,不滞留。"""
+        return any(not fut.done() for _r, fut in self._entries)
 
     async def responder(self, request: ApprovalRequest) -> ApprovalDecision:
         """引擎应答通道:请求入桥,等输入循环回填决定。
 
-        引擎超时掐死本协程时把 future 一并取消——应答步据此识别死条目。
+        引擎超时掐死本协程时把 future 一并取消;future 一旦终局(回填或
+        取消)条目即时出桥——状态条随下一次重绘就收回"审批等待应答",
+        不等操作员下次提交(04 票真机发现:死条目滞留会让状态条谎报)。
         """
         fut = asyncio.get_running_loop().create_future()
-        await self._inbox.put((request, fut))
+        self._entries.append((request, fut))
+        fut.add_done_callback(self._drop_done)
         try:
             return await fut
         except asyncio.CancelledError:
             fut.cancel()
             raise
 
+    def _drop_done(self, _fut: asyncio.Future) -> None:
+        """终局条目出桥(取消/回填都走到;drain 已取走的条目无妨)。"""
+        self._entries = [(r, f) for r, f in self._entries if not f.done()]
+
     def drain(self) -> List[Tuple[ApprovalRequest, asyncio.Future]]:
-        """取走全部挂起条目(应答步消费;至多一条——引擎逐个打断逐个应答)。"""
-        items = []
-        while not self._inbox.empty():
-            items.append(self._inbox.get_nowait())
-        return items
+        """取走全部活条目(应答步消费;至多一条——引擎逐个打断逐个应答)。"""
+        entries, self._entries = self._entries, []
+        return [(r, f) for r, f in entries if not f.done()]
 
     @staticmethod
     def resolve(fut: asyncio.Future, decision: ApprovalDecision) -> bool:
@@ -271,14 +277,27 @@ async def answer_pending_approvals(
         ) -> None:
     """输入循环的应答步(取下一条主提示前必经):挂起的审批逐条问人。
 
-    死条目(引擎已超时,终局拒绝已发生)跳过不问人;答案回填失败同样只
-    提示失效。read_answer 由交互形态注入(终端/Web 各配各的读法)。
+    死条目(引擎已超时,终局拒绝已发生)跳过不问人;问人途中条目死了
+    同样作废——读与条目赛跑,超时即收回审批提示,不等操作员(提示层
+    不得比引擎活得久),答案弃置只提示失效。read_answer 由交互形态注入
+    (终端/Web 各配各的读法)。
     """
     for request, fut in bridge.drain():
         if fut.done():
             cprint(_STALE_APPROVAL_NOTICE)
             continue
-        decision = await read_answer(request)
+        read_task = asyncio.create_task(read_answer(request))
+        await asyncio.wait({read_task, fut}, return_when=asyncio.FIRST_COMPLETED)
+        if fut.done():
+            # 引擎已终局(超时拒绝/退出收口):提示作废,读到一半也收回
+            read_task.cancel()
+            try:
+                await read_task
+            except asyncio.CancelledError:
+                pass
+            cprint(_STALE_APPROVAL_NOTICE)
+            continue
+        decision = read_task.result()
         if ApprovalBridge.resolve(fut, decision):
             cprint(format_decision_echo(decision))
         else:

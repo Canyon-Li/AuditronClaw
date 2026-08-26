@@ -5,7 +5,8 @@
 - 纯函数:parse_approval_answer 三选项映射、format_approval_block 完整参数、
   规则清单表与 id 前缀匹配、决定回显
 - 应答桥仲裁(输入冲突的确定行为):主提示提交的行永远排队成下一回合,
-  审批答案只来自审批提示;引擎超时留下的死条目跳过不问人;输入循环退出时
+  审批答案只来自审批提示;引擎超时留下的死条目即时出桥(状态条同拍收回);
+  问人途中条目死则收回提示不再等人;输入循环退出时
   挂起审批按无人拒收口(单 worker 队列不挂死)
 - 读答案循环:无效输入重问;Ctrl+C/Ctrl+D 一律拒(fail-closed)
 - 端到端(假 LLM 经 TUI 桥):心跳来源永不问人(无交互直接拒);批准一次/
@@ -183,7 +184,8 @@ class TestApprovalBridgeArbitration(unittest.TestCase):
         self.assertFalse(_run(scenario()))
 
     def test_dead_entry_from_timeout_is_skipped(self):
-        """引擎超时放弃应答器(future 被取消):死条目跳过,不问人不炸"""
+        """引擎超时放弃应答器(future 被取消):死条目即时出桥,应答步无事
+        可做——不问人、不补失效提示(失效已由状态条收回与引擎拒绝回复呈现)"""
         async def scenario():
             bridge = tui_main.ApprovalBridge()
             task = asyncio.create_task(bridge.responder(_req()))
@@ -193,18 +195,74 @@ class TestApprovalBridgeArbitration(unittest.TestCase):
                 await task
             except asyncio.CancelledError:
                 pass
+            await asyncio.sleep(0.01)
 
             async def read_answer(req):
                 raise AssertionError("死条目不得问人")
 
+            await tui_main.answer_pending_approvals(bridge, read_answer)
+            return bridge.pending
+
+        self.assertFalse(_run(scenario()), "死条目不滞留,不留残挂起")
+
+    def test_dead_entry_clears_pending_without_drain(self):
+        """死条目即时出桥:引擎超时掐死 future 的同一拍,挂起态即消——
+        状态条不得等到操作员下次提交才收回"审批等待应答"
+        (04 票真机两轮观察推翻 code-review 的'有界滞留'裁定)"""
+        async def scenario():
+            bridge = tui_main.ApprovalBridge()
+            task = asyncio.create_task(bridge.responder(_req()))
+            await _wait_until(lambda: bridge.pending)
+            task.cancel()  # wait_for 超时掐死应答器的形状
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            await asyncio.sleep(0.01)  # done 回调让出一拍
+            return bridge.pending
+
+        self.assertFalse(_run(scenario()),
+                         "future 已死,挂起态必须即时消失")
+
+    def test_timeout_abandons_hanging_approval_prompt(self):
+        """操作员已切到审批提示再沉默:引擎超时后提示不再等人,读到一半的
+        答案通道随之作废——超时即终局拒绝,提示层不得比引擎活得久
+        (04 票手工清单场景 4 真机发现)"""
+        async def scenario():
+            bridge = tui_main.ApprovalBridge()
+            task = asyncio.create_task(bridge.responder(_req()))
+            await _wait_until(lambda: bridge.pending)
+
+            cancelled = []
+
+            async def hanging_read(req):
+                try:
+                    await asyncio.Event().wait()  # 操作员在审批提示处沉默
+                except asyncio.CancelledError:
+                    cancelled.append(True)
+                    raise
+
+            async def engine_timeout_like():
+                await asyncio.sleep(0.05)
+                task.cancel()  # 引擎超时掐死应答器(future 一并取消)
+
+            timeout_task = asyncio.create_task(engine_timeout_like())
             calls = []
             with patch.object(tui_main, 'cprint',
                               side_effect=lambda *a, **k: calls.append(a)):
-                await tui_main.answer_pending_approvals(bridge, read_answer)
-            return bridge.pending, calls
+                await asyncio.wait_for(
+                    tui_main.answer_pending_approvals(bridge, hanging_read),
+                    timeout=3)
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            await timeout_task
+            return bridge.pending, cancelled, calls
 
-        pending, calls = _run(scenario())
+        pending, cancelled, calls = _run(scenario())
         self.assertFalse(pending, "死条目排空,不留残挂起")
+        self.assertEqual(cancelled, [True], "挂在提示上的读被取消,不泄漏")
         self.assertTrue(any("超时" in "".join(map(str, c)) for c in calls),
                         "给操作员一行失效说明")
 
@@ -608,6 +666,10 @@ class TestTuiBridgeEndToEnd(unittest.TestCase):
         results = [e for e in events if isinstance(e, ToolResult)]
         self.assertIn(REJECT_PHRASE, results[0].result,
                       "拒绝作为 tool_result 返回 agent,回合内收尾")
+        self.assertIn("操作员", results[0].result,
+                      "人拒的话术说操作员拒")
+        self.assertNotIn("无人值守", results[0].result,
+                         "操作员在场刚拒,不得谎称无人值守(真机发现)")
         self.assertIsInstance(events[-1], TurnEnd)
 
     def test_heartbeat_never_prompts_through_tui_bridge(self):
