@@ -214,7 +214,7 @@ class TestCredentialNeverReachesAuditFile(unittest.TestCase):
 
         # 等异步队列 flush 到 jsonl，再扫 system 级日志全文
         audit_logger.log_queue.join()
-        system_log = os.path.join("logs", "system.jsonl")
+        system_log = os.path.join(audit_logger.log_dir, "system.jsonl")
         self.assertTrue(os.path.exists(system_log), "system 级审计日志应存在")
         with open(system_log, encoding="utf-8") as f:
             full_text = f.read()

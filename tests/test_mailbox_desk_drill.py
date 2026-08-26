@@ -133,7 +133,7 @@ class TestDeskRoundPushFailureDrill(unittest.TestCase):
         # 等异步队列 flush 到 jsonl,再扫 system 级日志全文
         from auditronclaw.core.logger import audit_logger
         audit_logger.log_queue.join()
-        with open(os.path.join("logs", "system.jsonl"), encoding="utf-8") as f:
+        with open(os.path.join(audit_logger.log_dir, "system.jsonl"), encoding="utf-8") as f:
             full_text = f.read()
 
         self.assertIn("飞书推送失败", full_text, "失败必须留可检索的审计事件")

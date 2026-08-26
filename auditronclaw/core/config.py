@@ -17,6 +17,7 @@ SCRIPTS_DIR = os.path.join(WORKSPACE_DIR, "scripts")       # 脚本区：自动�
 OFFICE_DIR = os.path.join(WORKSPACE_DIR, "office")         # 沙盒工位 唯一被允许执行文件与shell操作的空间
 SKILLS_DIR = os.path.join(OFFICE_DIR, "skills")            # 技能卡槽
 TASKS_FILE = os.path.join(WORKSPACE_DIR, "tasks.json")
+LOG_DIR = os.path.join(WORKSPACE_DIR, "logs")            # 审计日志唯一落点：锚定 workspace，不随启动目录漂移
 
 for d in [WORKSPACE_DIR, MEMORY_DIR, PERSONAS_DIR, SCRIPTS_DIR, OFFICE_DIR, SKILLS_DIR]:
     os.makedirs(d, exist_ok=True)
