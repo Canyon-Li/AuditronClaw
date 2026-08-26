@@ -6,6 +6,7 @@ from langchain_core.messages import HumanMessage, RemoveMessage, SystemMessage
 from .context import AgentState, trim_context_messages
 from .provider import get_provider
 from .tools.builtins import BUILTIN_TOOLS, create_profile_tool
+from .approval.gate import wrap_all_tools
 from .logger import audit_logger
 from .config import MEMORY_DIR
 from .skill_loader import load_dynamic_skills
@@ -91,16 +92,22 @@ def create_agent_app(
 
     # 外接工具按个追加(ADR-001):内置全保留;同名时外接覆盖内置,且只保留一个。
     # 注意外接工具不经过命令白名单与路径防护(仅调用被审计),注入者自担安全责任。
+    extra_names = frozenset()
     if extra_tools:
         extra_by_name = {t.name: t for t in extra_tools}
         actual_tools = [extra_by_name.pop(t.name, t) for t in actual_tools]
         actual_tools.extend(extra_by_name.values())
-    
-    
-    tool_node = ToolNode(actual_tools)
+        extra_names = frozenset(t.name for t in extra_tools)
+
+    # 审批门:所有注册工具(内置/技能/外接)的调用必经"分级 → 规则 → 问人"
+    # 固定链。当前无人形态:无规则且无应答通道的高危调用拒绝并继续。
+    gated_tools = wrap_all_tools(actual_tools, thread_id=thread_id,
+                                 extra_names=extra_names)
+
+    tool_node = ToolNode(gated_tools)
 
     llm = get_provider(provider_name=provider_name, model_name=model_name)
-    llm_with_tools = llm.bind_tools(actual_tools)
+    llm_with_tools = llm.bind_tools(gated_tools)
 
     def agent_node(state: AgentState, config: RunnableConfig) -> dict:
         """
