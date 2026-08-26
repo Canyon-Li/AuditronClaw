@@ -14,6 +14,7 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.application import get_app
 
 from auditronclaw.core.agent import create_agent_app
+from auditronclaw.core.config import DB_PATH
 from auditronclaw.core.session import (
     ApprovalRequest,
     SessionEngine,

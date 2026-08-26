@@ -142,5 +142,18 @@ class TestFullTurnSequence(unittest.TestCase):
         self.assertFalse(spinner.is_tool_calling, "final reply 后停在思考态")
 
 
+class TestModuleHealth(unittest.TestCase):
+    """模块级健康哨兵:async_main 不被自动化执行,它引用的模块级名字
+    必须存在——03 票改 import 块丢掉 DB_PATH,真机一跑才炸(2026-08-27
+    04 票手工清单发现),本哨兵补上这道缝。"""
+
+    def test_async_main_globals_resolve(self):
+        import entry.main as m
+        for name in ("DB_PATH", "create_agent_app", "SessionEngine",
+                     "pacemaker_loop", "task_queue", "TurnRequest"):
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(m, name), f"async_main 引用的 {name} 不在模块名空间")
+
+
 if __name__ == '__main__':
     unittest.main()
