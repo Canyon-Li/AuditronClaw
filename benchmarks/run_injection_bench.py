@@ -27,7 +27,7 @@ from bench_pipeline import run_case, write_results
 
 CASES_FILE = Path(__file__).resolve().parent / "cases" / "injection_cases.yaml"
 
-SURFACES = ["skill_md", "file_content", "profile", "user_jailbreak", "email"]
+SURFACES = ["skill_md", "file_content", "profile", "user_jailbreak", "email", "interpreter"]
 
 
 # ============ 行为断言(判定层,纯函数) ============

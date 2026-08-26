@@ -207,7 +207,7 @@ class TestCredentialNeverReachesAuditFile(DeskToolTestCase):
         from auditronclaw.core.logger import audit_logger
         self._submit(FakeSender())
         audit_logger.log_queue.join()
-        with open(os.path.join("logs", "system.jsonl"), encoding="utf-8") as f:
+        with open(os.path.join(audit_logger.log_dir, "system.jsonl"), encoding="utf-8") as f:
             full_text = f.read()
         self.assertNotIn(self.secret_url, full_text)
         self.assertIn("事务台", full_text, "提交必须留可检索的审计事件")

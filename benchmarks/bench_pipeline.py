@@ -35,6 +35,11 @@ if str(PROJECT_ROOT) not in sys.path:
 # 绑定不会被 reload 刷新;agent 仍须函数内 import 才能拿到重载后的新绑定。
 from auditronclaw.core.session import SessionEngine, TurnEnd
 
+# 审计锚定:logger 单例在其模块导入时即构造,必须赶在首个 reload 把 config
+# 切去临时 workspace 之前导入——否则整场基准的审计会被首用例的临时目录锚走
+# (位置随场而变、临时目录会被系统清理),与"审计落 WORKSPACE_DIR/logs"相悖。
+import auditronclaw.core.logger  # noqa: F401  导入即固化锚点,不使用绑定
+
 from dotenv import load_dotenv
 
 load_dotenv(PROJECT_ROOT / ".env")

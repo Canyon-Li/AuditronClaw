@@ -200,7 +200,7 @@ class TestReadRecentEmailsSecurity(unittest.TestCase):
             read_recent_emails.invoke({"hours": 24, "max_emails": 10})
 
         audit_logger.log_queue.join()
-        system_log = os.path.join("logs", "system.jsonl")
+        system_log = os.path.join(audit_logger.log_dir, "system.jsonl")
         self.assertTrue(os.path.exists(system_log), "system 级审计日志应存在")
         with open(system_log, encoding="utf-8") as f:
             self.assertNotIn(secret, f.read())
