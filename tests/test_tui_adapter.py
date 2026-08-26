@@ -20,6 +20,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from auditronclaw.core.session import (
+    ApprovalRequest,
     ToolCall,
     ToolResult,
     Reply,
@@ -85,6 +86,25 @@ class TestEventBehaviorMapping(unittest.TestCase):
         spinner, calls = _drive([TurnEnd(trajectory=TurnTrajectory([], [], ""))])
         self.assertFalse(spinner.is_spinning)
         self.assertEqual(calls, [()], "行距收尾(旧代码回合末的无参空行 cprint())")
+
+    def test_approval_request_prints_block_and_pauses_tool_mode(self):
+        """审批打断事件:打印审批块(完整参数+风险级,04 票),spinner 退出
+        工具态转等人——回合未收尾,is_spinning 不动"""
+        spinner = FakeSpinner()
+        spinner.is_tool_calling = True
+        calls = []
+        request = ApprovalRequest(
+            tool="write_office_file",
+            args={"filepath": "reports/daily.md", "content": "x"},
+            risk_class="write", reason="写类副作用(目标:reports/daily.md)")
+        with patch.object(tui_main, 'cprint', side_effect=lambda *a, **k: calls.append(a)):
+            tui_main.handle_turn_event(request, spinner)
+        self.assertFalse(spinner.is_tool_calling, "审批等待:spinner 退出工具态")
+        self.assertTrue(spinner.is_spinning, "回合未收尾,spinner 不停")
+        flat = "".join("".join(map(str, c)) for c in calls)
+        self.assertIn("write_office_file", flat)
+        self.assertIn("write", flat)
+        self.assertIn("reports/daily.md", flat)
 
 
 class TestFullTurnSequence(unittest.TestCase):
