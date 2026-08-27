@@ -6,8 +6,9 @@
 - 假 LLM 驱动引擎测试:人来源回合 interrupt→应答→Command resume 放行/拒绝/
   永久允许铸规则/超时即拒;心跳来源构造上永不 interrupt;TOCTOU(批准后参数
   变更即拒);文本前缀标记不再影响来源判定
-- 基准零改动哨兵:bench_pipeline 不消费逐事件流,门在基准形态(缺省来源)
-  永不打断
+- 基准应答档位哨兵:bench_pipeline 不消费逐事件流,门在缺省(无人)形态
+  永不打断;有人档(06 票)经 attended 参数显式开启,行为测试在
+  tests/test_bench_approval_fixture.py
 
 词汇见 CONTEXT.md「审批门/审批规则」。假件先例:tests/test_session_engine.py。
 """
@@ -576,19 +577,24 @@ class TestApprovalBindsNormalizedCall(unittest.TestCase):
         self.assertIsInstance(events[-1], TurnEnd)
 
 
-# ============ 基准零改动哨兵 ============
+# ============ 基准应答档位哨兵 ============
 
 class TestBenchZeroChangeSentinel(unittest.TestCase):
-    """bench_pipeline 不消费逐事件流:门在基准形态(缺省来源)永不打断。"""
+    """bench_pipeline 不消费逐事件流:门在缺省(无人)形态永不打断。
+
+    06 票基准应答档位后契约更新:golden 档(有人且都批)经 attended 参数
+    显式开启——回合来源与应答器由档位注入,打断-续行仍全在引擎内部;
+    injection 档恒为缺省无人形态。档位行为测试见
+    tests/test_bench_approval_fixture.py。
+    """
 
     def test_bench_pipeline_source_untouched(self):
-        """源码哨兵:基准不得引入打断/续行/来源/审批事件的任何消费"""
+        """源码哨兵:基准不得亲手消费打断/续行/审批事件(那归引擎)"""
         import bench_pipeline
         src = Path(bench_pipeline.__file__).read_text(encoding="utf-8")
-        for banned in ("ApprovalRequest", "Command", "interrupt", "turn_origin",
-                       "approval_responder"):
+        for banned in ("ApprovalRequest", "Command", "interrupt"):
             self.assertNotIn(banned, src,
-                             f"bench_pipeline 出现 {banned!r}:基准适配器须零改动")
+                             f"bench_pipeline 出现 {banned!r}:打断-续行须留在会话引擎")
 
     def test_default_origin_turn_completes_with_gate_rejection(self):
         """缺省来源端到端:高危调用拒绝并继续,不挂起、不问人"""

@@ -343,6 +343,30 @@ class TestGateWrapper(GateTestBase):
         requested = self.audit_mock.log_event.call_args_list[0].kwargs
         self.assertEqual(requested["risk_class"], "write")
 
+    def test_optional_fields_omitted_still_execute(self):
+        """可选字段缺省不炸(06 票 golden 实测暴露的包装回归):
+
+        双层校验问题——外层包装的 pydantic 透传会把"可选字段默认值"展开成
+        显式 None 传进门,内层 tool.invoke 再校验时 pydantic 对 str 字段的
+        显式 None 直接抛 ValidationError(默认值只容许缺席,不容显式 null)。
+        无门时 ToolNode 单层校验、函数默认参收 None 相安无事;门必须把内层
+        调用还原成同一形态。回归样本:modify_scheduled_task 只传
+        task_id+new_time 时 new_description 被 None 展开炸掉
+        (gold_task_003 ✅→✗,经审计轨迹定责)。"""
+        received = {}
+
+        def read_like(task_id: str, new_time: str = None) -> str:
+            received.update(task_id=task_id, new_time=new_time)
+            return "读到"
+
+        raw = StructuredTool.from_function(
+            func=read_like, name="list_scheduled_tasks",
+            description="测试桩:可选字段缺省的读")
+        gated = wrap_tool(raw, thread_id="gate_test")
+        result = gated.invoke({"task_id": "t1001"})  # 未传可选字段 new_time
+        self.assertEqual(result, "读到")
+        self.assertEqual(received, {"task_id": "t1001", "new_time": None})
+
 
 def _spy_tool(tool_obj, calls: list):
     """给真工具外包一层记录调用的同型工具(不改名不改 schema)。"""

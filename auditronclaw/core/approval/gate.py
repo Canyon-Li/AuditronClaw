@@ -207,6 +207,25 @@ def _mint_persist_rules(rule_store, thread_id: str, assessment: RiskAssessment) 
             return
 
 
+def _inner_args(tool: BaseTool, kwargs: dict) -> dict:
+    """剥掉外层校验展开的可选字段默认 None,内层调用回到与无门时同一形态。
+
+    双层校验问题(06 票 golden 实测暴露):外层包装的 pydantic 透传把
+    "可选字段默认值"展开成显式 None 传进门,内层 tool.invoke 再校验时对
+    str 字段的显式 None 直接抛 ValidationError——默认值只容许缺席,不容
+    显式 null。无门时 ToolNode 单层校验、函数默认参收 None 相安无事
+    (回归样本:modify_scheduled_task 只传 task_id+new_time 被炸)。
+    只剥"可选字段 + None":必填字段的 None 保留,内层照常给出必填缺值的
+    诚实报错;显式传 null 的可选字段与缺省同义,与无门路径等价。
+    """
+    schema = getattr(tool, "args_schema", None)
+    fields = getattr(schema, "model_fields", None)
+    if not fields:
+        return kwargs
+    return {k: v for k, v in kwargs.items()
+            if not (v is None and not fields[k].is_required())}
+
+
 def wrap_tool(
     tool: BaseTool,
     *,
@@ -265,13 +284,13 @@ def wrap_tool(
         allowed, rejection = _decide(kwargs)
         if not allowed:
             return rejection
-        return tool.invoke(kwargs)
+        return tool.invoke(_inner_args(tool, kwargs))
 
     async def gated_arun(**kwargs):
         allowed, rejection = _decide(kwargs)
         if not allowed:
             return rejection
-        return await tool.ainvoke(kwargs)
+        return await tool.ainvoke(_inner_args(tool, kwargs))
 
     return StructuredTool.from_function(
         func=gated_run,
