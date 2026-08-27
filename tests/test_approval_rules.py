@@ -196,8 +196,10 @@ class TestClassifierTargets(unittest.TestCase):
         """白名单外域名:目标=绑定域名(05 票域名规则的地基)"""
         from unittest.mock import patch
         from auditronclaw.core.tools import domain_gate
+        # 三个名单来源全空:默认/环境变量/运行时审批规则(05 票起规则也是名单源)
         with patch.object(domain_gate, "DEFAULT_ALLOWED_DOMAINS", set()), \
-             patch.object(domain_gate, "_EXTENDED_DOMAINS", set()):
+             patch.object(domain_gate, "_EXTENDED_DOMAINS", set()), \
+             patch.object(domain_gate, "load_approval_rule_domains", return_value=[]):
             assess = classify_tool_call("send_feishu_summary", {"summary_text": "x"})
         self.assertEqual(assess.targets, ("open.feishu.cn",))
 

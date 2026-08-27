@@ -145,6 +145,10 @@ def _load_extended_commands():
 _EXTENDED_COMMANDS = _load_extended_commands()
 _ALLOWED_COMMANDS |= _EXTENDED_COMMANDS
 
+# 运行时审批扩展：明确不做（审批门 spec Out of Scope——无用户故事，触发时
+# 重议）。域名白名单有"永久允许"铸规则、判定期即时生效的运行期路径
+# （domain_gate），命令白名单的运行期扩展仍只有环境变量显式授权这一条路。
+
 
 # ============ 段解析(命令校验与副作用分级的共同源头) ============
 #

@@ -190,8 +190,10 @@ class TestClassifierBoundDomain(unittest.TestCase):
         """不命中:绑定域被移出名单 → domain_extend 必批(扩展流程归 05 票)"""
         from unittest.mock import patch
         from auditronclaw.core.tools import domain_gate
+        # 三个名单来源全空:默认/环境变量/运行时审批规则(05 票起规则也是名单源)
         with patch.object(domain_gate, "DEFAULT_ALLOWED_DOMAINS", set()), \
-             patch.object(domain_gate, "_EXTENDED_DOMAINS", set()):
+             patch.object(domain_gate, "_EXTENDED_DOMAINS", set()), \
+             patch.object(domain_gate, "load_approval_rule_domains", return_value=[]):
             assess = classify_tool_call("send_feishu_summary", {"summary_text": "x"})
         self.assertEqual(assess.risk_class, RISK_DOMAIN_EXTEND)
         self.assertTrue(assess.requires_approval)
