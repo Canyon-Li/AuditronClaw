@@ -156,8 +156,10 @@ class TestSubmitDeskReport(DeskToolTestCase):
     def test_domain_gate_denial_lands_todos_but_refuses_push(self):
         """域名门拒绝:本地落盘照常(门管的是网络),推送被拒并落审计"""
         from auditronclaw.core.tools import domain_gate
+        # 三个名单来源全空:默认/环境变量/运行时审批规则(审批门 05 票起规则也是名单源)
         with patch.object(domain_gate, "DEFAULT_ALLOWED_DOMAINS", set()), \
-             patch.object(domain_gate, "_EXTENDED_DOMAINS", set()):
+             patch.object(domain_gate, "_EXTENDED_DOMAINS", set()), \
+             patch.object(domain_gate, "load_approval_rule_domains", return_value=[]):
             result, sender = self._submit(FakeSender())
 
         self.assertEqual(self._tasks_on_disk().__len__(), 1)

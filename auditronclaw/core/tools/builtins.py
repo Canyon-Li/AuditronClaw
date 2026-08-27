@@ -85,9 +85,32 @@ def get_system_model_info() -> str:
     return f"当前使用的模型提供商(Provider)是: {provider}，具体型号(Model)是: {model}。"
 
 
+def _check_thread_id(thread_id: str) -> str:
+    """thread_id 归一化校验(审批门 05 票):画像落点锁死在 memory/profiles/ 内。
+
+    thread_id 由操作员/会话层/基准适配器提供、bake 进画像工具,LLM 的参数面
+    里没有它;基准的 thread_id 形如 "前缀/用例号"(bench_pipeline._drive_agent),
+    故允许 profiles 内的子路径,拒的是逃逸形态:上跳(..)、盘符(:)、绝对路径
+    (首分隔符)与空白——末尾再以解析后落点做一次包含判定兜底,不靠逐字符猜。
+    """
+    if (not isinstance(thread_id, str) or not thread_id
+            or thread_id != thread_id.strip()):
+        raise ValueError(f"thread_id 非法(须为非空、无首尾空白的字符串): {thread_id!r}")
+    if ".." in thread_id or ":" in thread_id:
+        raise ValueError(f"thread_id 含上跳或盘符形态,拒绝: {thread_id!r}")
+    if thread_id[0] in "/\\":
+        raise ValueError(f"thread_id 是绝对路径形态,拒绝: {thread_id!r}")
+    base = os.path.normcase(os.path.abspath(os.path.join(MEMORY_DIR, "profiles")))
+    target = os.path.normcase(
+        os.path.abspath(os.path.join(base, thread_id + ".md")))
+    if not target.startswith(base + os.sep):
+        raise ValueError(f"thread_id 解析后逃出画像区,拒绝: {thread_id!r}")
+    return thread_id
+
+
 def _profile_path(thread_id: str) -> str:
-    """按会话返回画像文件路径:memory/profiles/<thread_id>.md"""
-    return os.path.join(MEMORY_DIR, "profiles", f"{thread_id}.md")
+    """按会话返回画像文件路径:memory/profiles/<thread_id>.md(归一化后落点锁死)"""
+    return os.path.join(MEMORY_DIR, "profiles", f"{_check_thread_id(thread_id)}.md")
 
 
 def create_profile_tool(thread_id: str):
@@ -95,8 +118,11 @@ def create_profile_tool(thread_id: str):
     按会话构造 save_user_profile 工具(工厂)。
     会话身份在此 bake 进闭包——工具层无需知道当前 thread_id,
     调用方(agent 创建工具时)按会话传入即可。
+    thread_id 组装期即归一化(非法 id 当场拒,不等到首调才炸)。
     画像写入前读旧内容做行级 diff,记入审计日志(画像变更留痕)。
     """
+    _check_thread_id(thread_id)
+
     @auditronclaw_tool
     def save_user_profile(new_content: str) -> str:
         """

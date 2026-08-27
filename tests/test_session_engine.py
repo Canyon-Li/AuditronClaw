@@ -95,30 +95,38 @@ SCRIPT = [
 
 
 def _enter_fake_tool_patches(stack, llm):
-    """现有缝三件套:假 LLM + 假工具表 + 空技能表。
+    """现有缝三件套 + 审批门入册:假 LLM + 假工具表 + 空技能表 + 假工具入副作用册。
 
     两侧(引擎/基准)都走 BUILTIN_TOOLS 缝而非 tools= 直给——_drive_agent
     内部自建 app 只吃这条路径,两侧必须同构工具表,等价性才成立。
+    假探针工具按"新工具入册即加映射"纪律注册为纯读——本文件测的是解析
+    等价性,不是审批门(门的行为由 tests/test_approval_gate.py 把守)。
     """
+    from auditronclaw.core.approval import classifier
     for p in (
         patch('auditronclaw.core.agent.get_provider', return_value=llm),
         patch('auditronclaw.core.agent.BUILTIN_TOOLS', FAKE_TOOLS),
         patch('auditronclaw.core.agent.load_dynamic_skills', return_value=[]),
+        patch.object(classifier, "_PURE_READ_TOOLS",
+                     classifier._PURE_READ_TOOLS | {"fake_probe", "fake_check"}),
     ):
         stack.enter_context(p)
 
 
-def _build_app(llm):
-    """走现有缝构造 agent app:假 LLM + 假工具表 + 空技能表。"""
+def _build_app(llm, stack):
+    """走现有缝构造 agent app:假 LLM + 假工具表 + 空技能表 + 假工具入册。
+
+    patch 由调用方的 stack 持有,须罩住整个运行期——审批门分级发生在工具
+    调用时(而非 app 构造时),构造完就撤 patch 会让假工具在门处被判未入册。
+    """
     from auditronclaw.core.agent import create_agent_app
-    with ExitStack() as stack:
-        _enter_fake_tool_patches(stack, llm)
-        return create_agent_app(
-            provider_name="fake",
-            model_name="fake-model",
-            checkpointer=MemorySaver(),
-            thread_id="session_engine_test",
-        )
+    _enter_fake_tool_patches(stack, llm)
+    return create_agent_app(
+        provider_name="fake",
+        model_name="fake-model",
+        checkpointer=MemorySaver(),
+        thread_id="session_engine_test",
+    )
 
 
 async def _drive_engine(app, thread_id, text):
@@ -134,8 +142,9 @@ class TestTrajectoryEquivalence(unittest.TestCase):
 
     def test_trajectory_matches_baseline_drive_agent(self):
         # 侧一:引擎(TurnEnd 携带聚合轨迹)
-        engine_events = asyncio.run(_drive_engine(
-            _build_app(ScriptedLLM(SCRIPT)), "equiv/engine", TRIGGER))
+        with ExitStack() as stack:
+            app = _build_app(ScriptedLLM(SCRIPT), stack)
+            engine_events = asyncio.run(_drive_engine(app, "equiv/engine", TRIGGER))
         self.assertIsInstance(engine_events[-1], TurnEnd)
         traj = engine_events[-1].trajectory
 
@@ -168,8 +177,9 @@ class TestEventStreamShape(unittest.TestCase):
     """断言②:事件流形状钉死——类型序、final 标记、TurnEnd 搭载轨迹。"""
 
     def test_event_sequence_and_fields(self):
-        events = asyncio.run(_drive_engine(
-            _build_app(ScriptedLLM(SCRIPT)), "shape/engine", TRIGGER))
+        with ExitStack() as stack:
+            app = _build_app(ScriptedLLM(SCRIPT), stack)
+            events = asyncio.run(_drive_engine(app, "shape/engine", TRIGGER))
 
         # 类型序:并存消息先发 ToolCall 再发 Reply(final=False)
         self.assertEqual(
@@ -211,16 +221,17 @@ class TestExceptionPropagates(unittest.TestCase):
             ),
             RuntimeError("模拟回合中途故障"),
         ]
-        app = _build_app(ScriptedLLM(script))
+        with ExitStack() as stack:
+            app = _build_app(ScriptedLLM(script), stack)
 
-        async def run():
-            events = []
-            with self.assertRaises(RuntimeError) as ctx:
-                async for ev in SessionEngine(app, "boom/engine").run_turn(TRIGGER):
-                    events.append(ev)
-            return events, ctx
+            async def run():
+                events = []
+                with self.assertRaises(RuntimeError) as ctx:
+                    async for ev in SessionEngine(app, "boom/engine").run_turn(TRIGGER):
+                        events.append(ev)
+                return events, ctx
 
-        events, ctx = asyncio.run(run())
+            events, ctx = asyncio.run(run())
         self.assertEqual(str(ctx.exception), "模拟回合中途故障", "异常原样上抛")
         self.assertFalse(
             [e for e in events if isinstance(e, TurnEnd)],
@@ -229,14 +240,14 @@ class TestExceptionPropagates(unittest.TestCase):
 
 
 class TestEventInterface(unittest.TestCase):
-    """事件类型接口钉子:frozen dataclass + TurnEvent 子类 + approval_request 占位。"""
+    """事件类型接口钉子:frozen dataclass + TurnEvent 子类(审批打断事件含字段)。"""
 
     def test_all_event_types_are_frozen_turn_events(self):
         samples = [
             ToolCall(name="t", args={}),
             ToolResult(tool="t", result="r"),
             Reply(content="c", final=True),
-            ApprovalRequest(),
+            ApprovalRequest(tool="t", args={}, risk_class="write", reason="r"),
             TurnEnd(trajectory=TurnTrajectory([], [], "")),
         ]
         for ev in samples:

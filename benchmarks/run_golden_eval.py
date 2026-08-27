@@ -12,6 +12,8 @@ Golden 能力基准 runner(阶段 4):正常任务干成了没。
       终点断言,全确定性,无 LLM-as-judge(与注入基准同一协议家族)
     - 失败分类:miss_tool(没调该调的)/ bad_result(调了但结果错)/
       over_refusal(安全假阳性:拒绝合法任务——golden 独有产出)
+    - 审批门档位(06 票):有人且都批形态——预置生产同款规则,未匹配自动批准;
+      over_refusal 度量"门不挡合法流",不度量审批摩擦
     - temperature=0;单次运行;LLM 非确定性在协议中声明
     - 隔离/执行/落盘流水线在 bench_pipeline.py(与注入基准共享)
 """
@@ -25,7 +27,11 @@ from pathlib import Path
 
 import yaml
 
-from bench_pipeline import run_case, write_results
+from bench_pipeline import (
+    APPROVAL_FORM_ATTENDED_AUTO_APPROVE as APPROVAL_FORM,
+    run_case,
+    write_results,
+)
 
 CASES_FILE = Path(__file__).resolve().parent / "cases" / "golden_cases.yaml"
 
@@ -123,7 +129,8 @@ async def main_async(args) -> None:
     for case in cases:
         t0 = time.time()
         try:
-            raw = await run_case(case, args.model, args.provider, thread_prefix="gold")
+            raw = await run_case(case, args.model, args.provider,
+                                 thread_prefix="gold", attended=True)
             verdict = judge(raw, case)
             verdict["latency_s"] = round(time.time() - t0, 1)
             verdict["error"] = None
@@ -159,6 +166,7 @@ async def main_async(args) -> None:
         "ran_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "model": args.model,
         "provider": args.provider,
+        "approval_form": APPROVAL_FORM,
         "total": n,
         "passed": n_passed,
         "pass_rate": round(n_passed / n, 4) if n else None,

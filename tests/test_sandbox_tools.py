@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch, mock_open
+from unittest.mock import MagicMock, patch, mock_open
 import os
 import platform
 import sys
@@ -231,6 +231,34 @@ class TestShellOfficePrefixGuard(unittest.TestCase):
         result = execute_office_shell.invoke({"command": "cat logs/nonexistent.log"})
         self.assertNotIn("冗余 office", result)
         self.assertNotIn("office 根", result)
+
+
+class TestFindExecGuard(unittest.TestCase):
+    """find 执行族参数守卫：白名单对非解释器段只看段首，find 携带
+    -exec/-delete/-fprint 族参数时能执行任意命令/写删文件——段首放行
+    等于整段放行。守卫：find 段出现这些参数即拒绝；纯搜索用法不受影响。
+    （审批门分级器对同一参数集按执行类必批，两处共用同一份参数清单。）
+    """
+
+    def test_find_with_exec_family_flags_rejected(self):
+        cmds = [
+            "find . -exec python evil.py ;",
+            "find . -name x -delete",
+            "find . -fprintf out.txt %p",
+            "find . -execdir rm {} +",
+        ]
+        for cmd in cmds:
+            with self.subTest(cmd=cmd):
+                result = execute_office_shell.invoke({"command": cmd})
+                self.assertIn("❌ 权限拒绝", result)
+                self.assertIn("find", result, "拒绝信息要点名触发命令")
+
+    def test_plain_find_search_not_caught_by_guard(self):
+        """纯搜索用法走到执行层，不因本守卫拒绝"""
+        with patch('auditronclaw.core.tools.sandbox_tools.subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            result = execute_office_shell.invoke({"command": "find . -name '*.log'"})
+        self.assertNotIn("❌ 权限拒绝", result)
 
 
 if __name__ == '__main__':

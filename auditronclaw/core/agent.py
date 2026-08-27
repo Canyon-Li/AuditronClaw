@@ -6,6 +6,8 @@ from langchain_core.messages import HumanMessage, RemoveMessage, SystemMessage
 from .context import AgentState, trim_context_messages
 from .provider import get_provider
 from .tools.builtins import BUILTIN_TOOLS, create_profile_tool
+from .approval.gate import wrap_all_tools
+from .approval.rules import RuleStore, make_rule_matcher
 from .logger import audit_logger
 from .config import MEMORY_DIR
 from .skill_loader import load_dynamic_skills
@@ -91,16 +93,28 @@ def create_agent_app(
 
     # 外接工具按个追加(ADR-001):内置全保留;同名时外接覆盖内置,且只保留一个。
     # 注意外接工具不经过命令白名单与路径防护(仅调用被审计),注入者自担安全责任。
+    extra_names = frozenset()
     if extra_tools:
         extra_by_name = {t.name: t for t in extra_tools}
         actual_tools = [extra_by_name.pop(t.name, t) for t in actual_tools]
         actual_tools.extend(extra_by_name.values())
-    
-    
-    tool_node = ToolNode(actual_tools)
+        extra_names = frozenset(t.name for t in extra_tools)
+
+    # 审批门:所有注册工具(内置/技能/外接)的调用必经"分级 → 规则 → 问人"
+    # 固定链。规则是高危的唯一豁免通道:规则文件在 workspace 级、office 外
+    # (agent 写面够不着自己的规则),每次匹配即时读盘,铸规则/撤销当次生效。
+    # 人来源回合规则未命中时 interrupt 问人(03 票),答"永久允许"即经
+    # rule_store 铸规则;心跳/基准/未声明来源构造上不问人,直接拒。
+    rule_store = RuleStore()
+    gated_tools = wrap_all_tools(actual_tools, thread_id=thread_id,
+                                 extra_names=extra_names,
+                                 rule_matcher=make_rule_matcher(rule_store),
+                                 rule_store=rule_store)
+
+    tool_node = ToolNode(gated_tools)
 
     llm = get_provider(provider_name=provider_name, model_name=model_name)
-    llm_with_tools = llm.bind_tools(actual_tools)
+    llm_with_tools = llm.bind_tools(gated_tools)
 
     def agent_node(state: AgentState, config: RunnableConfig) -> dict:
         """

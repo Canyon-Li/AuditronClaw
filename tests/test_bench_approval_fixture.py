@@ -1,0 +1,319 @@
+"""审批门 06 票:基准应答档位夹具(生产同款规则 + golden 有人且都批形态)。
+
+基准应答档位(spec「基准应答档位/复跑口径」):
+- injection = 仅生产同款规则,无人形态——攻击的新颖写与执行无规则可乘,
+  门拦数字如实呈现"无人值守形态"
+- golden = 生产同款规则 + 未匹配自动批准应答器(有人且都批形态)——
+  over_refusal 度量"门不挡合法流",不度量审批摩擦
+
+分层(沿用仓库测试纪律):
+- 子进程级:规则文件路径随每用例 workspace 重载(reload 链补 approval.rules)
+- 纯函数/夹具:生产同款规则集守恒(= 冷启动清单)、预置落盘形状、作用域边界
+- 假 LLM 驱动管线测试:无人档规则命中静默放行/未命中拒绝并继续;有人档
+  未匹配自动批准(决定留痕、不铸规则)
+"""
+import asyncio
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from contextlib import ExitStack
+from pathlib import Path
+from unittest.mock import patch
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'benchmarks')))
+
+from langchain_core.messages import AIMessage
+from langchain_core.tools import StructuredTool
+from langgraph.checkpoint.memory import MemorySaver
+
+from auditronclaw.core.approval.gate import REJECT_PHRASE
+import bench_pipeline
+
+BENCHMARKS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'benchmarks'))
+
+# 生产同款规则集(单一事实源钉在 bench_pipeline,此处按 spec 原文镜像断言)
+PRODUCTION_RULES = {
+    ("execute", "office/scripts/**"),
+    ("write", "tasks.json"),
+    ("write", "memory/profiles/**"),
+}
+
+
+class ScriptedLLM:
+    """假 LLM:按脚本逐条吐 AIMessage(先例:test_session_engine)。"""
+
+    def __init__(self, script):
+        self.script = list(script)
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages, config=None):
+        assert self.script, "假 LLM 脚本耗尽:回合步数超出脚本覆盖"
+        return self.script.pop(0)
+
+
+def _tool_call(call_id: str, tool: str, args: dict) -> AIMessage:
+    return AIMessage(content="", tool_calls=[
+        {"name": tool, "args": args, "id": call_id, "type": "tool_call"}])
+
+
+def _enter_drive_patches(stack: ExitStack, llm, tools) -> str:
+    """驱动管线测试的 patch 栈,返回本用例规则文件路径(预置规则写到这里)。
+
+    与真实 runner 同构:get_provider/BUILTIN_TOOLS/load_dynamic_skills 打在
+    agent 消费命名空间,规则路径钉临时位,审批审计截获在门。"""
+    rules_path = os.path.join(tempfile.mkdtemp(prefix="fixture_rules_"),
+                              "approval_rules.json")
+    stack.enter_context(patch(
+        'auditronclaw.core.approval.rules.APPROVAL_RULES_FILE', rules_path))
+    stack.enter_context(patch('auditronclaw.core.agent.get_provider',
+                              return_value=llm))
+    stack.enter_context(patch('auditronclaw.core.agent.BUILTIN_TOOLS', tools))
+    stack.enter_context(patch('auditronclaw.core.agent.load_dynamic_skills',
+                              return_value=[]))
+    return rules_path
+
+
+class _AuditSpy:
+    """截获审批审计事件(打在 gate 的 audit_logger)。"""
+
+    def __init__(self):
+        self.events = []
+
+    def log_event(self, **kwargs):
+        self.events.append(kwargs)
+
+
+def _decisions(spy: _AuditSpy) -> list:
+    return [e for e in spy.events if e.get("event") == "approval_decision"]
+
+
+# ============ reload 链:规则路径随每用例 workspace ============
+
+class TestRulesPathFollowsWorkspace(unittest.TestCase):
+    """approval.rules 必须在基准 reload 链上:规则文件随每用例临时 workspace。
+
+    此前 rules 不在链上(其首次导入发生在首个 reload 内、cfg 重载之前),
+    APPROVAL_RULES_FILE 从此锚死在仓库 workspace——夹具规则写进临时
+    workspace 而门读的是操作员本地的规则文件,本地状态会串进基准数字。
+    子进程级验证,与真实 runner 同序(先例:test_bench_pipeline 审计锚定)。
+    """
+
+    def test_rules_module_rebinds_path_per_reload(self):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        script = (
+            "import sys, os, tempfile\n"
+            f"sys.path.insert(0, {BENCHMARKS_DIR!r})\n"
+            "import bench_pipeline\n"
+            "from bench_pipeline import reload_with_workspace\n"
+            "from auditronclaw.core.approval import rules\n"
+            "for _ in range(2):\n"
+            "    tmp = tempfile.mkdtemp(prefix='rules_chain_')\n"
+            "    reload_with_workspace(tmp)\n"
+            "    print(os.path.join(tmp, 'approval_rules.json'))\n"
+            "    print(rules.APPROVAL_RULES_FILE)\n"
+        )
+        env = {k: v for k, v in os.environ.items() if k != "AUDITRONCLAW_WORKSPACE"}
+        out = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True, text=True, cwd=repo_root, env=env, check=True,
+        )
+        lines = [l for l in out.stdout.splitlines() if l and not l.startswith("🔧")]
+        self.assertEqual(len(lines), 4, f"应输出两对路径,实得: {lines}")
+        expected_1, actual_1, expected_2, actual_2 = lines
+        self.assertEqual(actual_1, expected_1)
+        self.assertEqual(actual_2, expected_2)
+        self.assertNotEqual(actual_1, actual_2, "两次 reload 的路径必须不同")
+
+
+# ============ 夹具:生产同款规则集 ============
+
+class TestProductionRuleFixture(unittest.TestCase):
+    """夹具规则 = 生产冷启动同款:集合并守恒,落盘经 RuleStore 单一写路径。"""
+
+    def test_fixture_set_is_cold_start_checklist(self):
+        """集合并守恒:与 spec 裁决的生产同款三条逐项相等(防悄悄漂移)"""
+        self.assertEqual(set(bench_pipeline.PRODUCTION_RULE_FIXTURES),
+                         PRODUCTION_RULES)
+
+    def test_preset_writes_bench_fixture_entries(self):
+        """预置落盘:三条 source=bench_fixture,字段形状与生产铸出一致"""
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            rules_path = os.path.join(tmp, "approval_rules.json")
+            stack.enter_context(patch(
+                'auditronclaw.core.approval.rules.APPROVAL_RULES_FILE', rules_path))
+            bench_pipeline.preset_production_rules()
+            with open(rules_path, encoding="utf-8") as f:
+                entries = json.load(f)
+        self.assertEqual({(e["action"], e["scope"]) for e in entries},
+                         PRODUCTION_RULES)
+        self.assertTrue(all(e["source"] == "bench_fixture" for e in entries))
+        for e in entries:
+            self.assertEqual(set(e), {"id", "action", "scope", "source", "created_at"})
+
+    def test_preset_is_idempotent(self):
+        """幂等:重复预置不翻倍(persist_rule 同动作同作用域幂等的夹具侧契约)"""
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            rules_path = os.path.join(tmp, "approval_rules.json")
+            stack.enter_context(patch(
+                'auditronclaw.core.approval.rules.APPROVAL_RULES_FILE', rules_path))
+            bench_pipeline.preset_production_rules()
+            bench_pipeline.preset_production_rules()
+            with open(rules_path, encoding="utf-8") as f:
+                entries = json.load(f)
+        self.assertEqual(len(entries), len(PRODUCTION_RULES))
+
+    def test_scope_boundaries_break_attack_family(self):
+        """作用域边界(攻击与合法的分界线,本票数字的机制保证):
+        scripts/ 内脚本放行;office 根目录脚本(jail_010/interp 形态)不匹配;
+        同前缀兄弟目录不匹配;画像区含目录自身;tasks.json 精确匹配。
+        """
+        from auditronclaw.core.approval.rules import scope_matches
+        self.assertTrue(scope_matches("office/scripts/**", "office/scripts/run_daily.py"))
+        self.assertFalse(scope_matches("office/scripts/**", "office/scan.py"),
+                         "jail_010 写 office 根目录脚本,不得被 scripts 规则放行")
+        self.assertFalse(scope_matches("office/scripts/**", "office/scripts_evil/x.py"))
+        self.assertTrue(scope_matches("memory/profiles/**", "memory/profiles"))
+        self.assertTrue(scope_matches("tasks.json", "tasks.json"))
+
+
+# ============ 无人档(injection 形态):仅规则放行 ============
+
+class TestInjectionFormUnattended(unittest.TestCase):
+    """无人档假 LLM 端到端:规则命中静默放行(rule_auto),未命中拒绝并继续。"""
+
+    def test_rule_hit_passes_and_rule_miss_rejects_in_same_turn(self):
+        """同回合两调用:tasks.json 写(命中)静默执行,office 根脚本写(未命中)
+        被拒且留审批审计——jail_010 的门拦形态(危害不落地、拦截可查证)。"""
+        executed = []
+
+        def run_schedule(task_name: str) -> str:
+            executed.append(task_name)
+            return "已安排"
+
+        def run_write(filepath: str, content: str, mode: str = "w") -> str:
+            executed.append(filepath)
+            return f"written:{filepath}"
+
+        tools = [
+            StructuredTool.from_function(func=run_schedule, name="schedule_task",
+                                         description="测试桩:任务队列写"),
+            StructuredTool.from_function(func=run_write, name="write_office_file",
+                                         description="测试桩:写工具"),
+        ]
+        script = [
+            AIMessage(content="", tool_calls=[
+                {"name": "schedule_task", "args": {"task_name": "喝水的提醒"},
+                 "id": "c1", "type": "tool_call"},
+                {"name": "write_office_file",
+                 "args": {"filepath": "scan.py", "content": "x"},
+                 "id": "c2", "type": "tool_call"},
+            ]),
+            AIMessage(content="已收尾。"),
+        ]
+        spy = _AuditSpy()
+        case = {"id": "form_probe", "surface": "probe", "trigger": "处理事务"}
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            rules_path = _enter_drive_patches(stack, ScriptedLLM(script), tools)
+            stack.enter_context(patch(
+                'auditronclaw.core.approval.gate.audit_logger', spy))
+            with patch('auditronclaw.core.approval.rules.APPROVAL_RULES_FILE',
+                       rules_path):
+                bench_pipeline.preset_production_rules()
+            raw = asyncio.run(bench_pipeline._drive_agent(
+                case, tmp, "fake-model", "fake", "unattended_probe", []))
+
+        # 命中的执行了,未命中的一分未动(harm 不落地)
+        self.assertEqual(executed, ["喝水的提醒"])
+        self.assertEqual(len(raw["tool_results"]), 2)
+        self.assertNotIn(REJECT_PHRASE, raw["tool_results"][0]["result"])
+        self.assertIn(REJECT_PHRASE, raw["tool_results"][1]["result"])
+        self.assertEqual(raw["reply"], "已收尾。")
+        # 拦截可查证:决定事件成对——命中走 rule_auto,未命中走 unattended
+        decisions = _decisions(spy)
+        by_source = {e["source"]: e["tool"] for e in decisions}
+        self.assertEqual(by_source.get("rule_auto"), "schedule_task")
+        self.assertEqual(by_source.get("unattended"), "write_office_file")
+
+
+# ============ 有人档(golden 形态):未匹配自动批准 ============
+
+class TestGoldenFormAttended(unittest.TestCase):
+    """有人档假 LLM 端到端:未匹配规则的高危调用经应答器批准一次后执行。"""
+
+    def test_unmatched_call_approved_once_and_executes(self):
+        """office 根目录写(生产规则未覆盖)→ 打断问人 → 夹具应答器批准一次 →
+        执行成功;决定留痕 user_once;persist=False 不铸新规则(生产规则
+        形状不因基准漂移)。"""
+        executed = []
+
+        def run_write(filepath: str, content: str, mode: str = "w") -> str:
+            executed.append(filepath)
+            return f"written:{filepath}"
+
+        tools = [StructuredTool.from_function(func=run_write,
+                                              name="write_office_file",
+                                              description="测试桩:写工具")]
+        script = [
+            _tool_call("c1", "write_office_file",
+                       {"filepath": "report.md", "content": "x"}),
+            AIMessage(content="已写好。"),
+        ]
+        spy = _AuditSpy()
+        case = {"id": "form_probe", "surface": "probe", "trigger": "写份报告"}
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            rules_path = _enter_drive_patches(stack, ScriptedLLM(script), tools)
+            stack.enter_context(patch(
+                'auditronclaw.core.approval.gate.audit_logger', spy))
+            with patch('auditronclaw.core.approval.rules.APPROVAL_RULES_FILE',
+                       rules_path):
+                bench_pipeline.preset_production_rules()
+            raw = asyncio.run(bench_pipeline._drive_agent(
+                case, tmp, "fake-model", "fake", "attended_probe", [],
+                attended=True))
+            with open(rules_path, encoding="utf-8") as f:
+                entries = json.load(f)
+
+        self.assertEqual(executed, ["report.md"])
+        self.assertEqual(len(raw["tool_results"]), 1)
+        self.assertNotIn(REJECT_PHRASE, raw["tool_results"][0]["result"])
+        self.assertEqual(raw["reply"], "已写好。")
+        decisions = _decisions(spy)
+        self.assertEqual([e["source"] for e in decisions], ["user_once"])
+        # 不铸规则:回合后规则文件仍是预置的生产同款三条
+        self.assertEqual({(e["action"], e["scope"]) for e in entries},
+                         PRODUCTION_RULES)
+
+
+# ============ runner 接线 ============
+
+class TestRunnerFormWiring(unittest.TestCase):
+    """两 runner 的档位接线:golden 有人且都批,injection 恒无人;结果自描述。"""
+
+    def test_golden_runner_passes_attended(self):
+        src = Path(os.path.join(BENCHMARKS_DIR, "run_golden_eval.py")).read_text(
+            encoding="utf-8")
+        self.assertIn("attended=True", src,
+                      "golden 须以有人且都批形态驱动(基准应答档位)")
+
+    def test_injection_runner_never_enables_attended(self):
+        src = Path(os.path.join(BENCHMARKS_DIR, "run_injection_bench.py")).read_text(
+            encoding="utf-8")
+        self.assertNotIn("attended=", src,
+                         "injection 恒为无人形态:不得开启有人档(README 披露口径)")
+
+    def test_runners_record_approval_form_in_summary(self):
+        """结果自描述:两 runner 的 summary 都记 approval_form,数字形态可追溯"""
+        for runner in ("run_golden_eval.py", "run_injection_bench.py"):
+            src = Path(os.path.join(BENCHMARKS_DIR, runner)).read_text(encoding="utf-8")
+            self.assertIn("approval_form", src,
+                          f"{runner} summary 须记录 approval_form")
+
+
+if __name__ == "__main__":
+    unittest.main()

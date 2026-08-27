@@ -79,11 +79,18 @@ SCRIPT = [
 
 
 def _enter_fake_tool_patches(stack, llm):
-    """现有缝三件套:假 LLM + 假工具表 + 空技能表(patch 须罩住整个运行期)。"""
+    """现有缝三件套 + 审批门入册:假 LLM + 假工具表 + 空技能表 + 假工具入副作用册。
+
+    假探针工具按"新工具入册即加映射"纪律注册为纯读——本文件钉的是适配器
+    结果 dict 的形状,不是审批门(门的行为由 tests/test_approval_gate.py 把守)。
+    """
+    from auditronclaw.core.approval import classifier
     for p in (
         patch('auditronclaw.core.agent.get_provider', return_value=llm),
         patch('auditronclaw.core.agent.BUILTIN_TOOLS', FAKE_TOOLS),
         patch('auditronclaw.core.agent.load_dynamic_skills', return_value=[]),
+        patch.object(classifier, "_PURE_READ_TOOLS",
+                     classifier._PURE_READ_TOOLS | {"fake_probe", "fake_check"}),
     ):
         stack.enter_context(p)
 

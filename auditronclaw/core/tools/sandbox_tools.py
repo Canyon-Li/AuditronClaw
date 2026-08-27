@@ -54,8 +54,12 @@ def _resolve_office_path(relative_path: str) -> tuple:
     # 将目标路径转化为绝对路径
     target_path = os.path.abspath(os.path.join(base_dir, normalized))
 
-    # 核心防御：目标路径必须以 OFFICE_DIR 开头！
-    if not target_path.startswith(base_dir):
+    # 核心防御：目标路径必须严格落在 OFFICE_DIR 内——前缀之后必须跟路径
+    # 分隔符（normcase 消掉 Windows 大小写与斜杠差异）。裸 startswith 会
+    # 放过同前缀兄弟名：../office_x 解析后以 office 开头却根本不在工位内，
+    # 这是 agent 写面逃出 office、够着 office 外文件（如审批规则）的一条缝
+    norm_target, norm_base = os.path.normcase(target_path), os.path.normcase(base_dir)
+    if norm_target != norm_base and not norm_target.startswith(norm_base + os.sep):
         raise PermissionError(f"越权拦截：你试图访问沙盒外的路径 '{relative_path}'！你只能在 office 工位内活动。")
 
     return target_path, normalized
@@ -72,7 +76,7 @@ def _get_safe_path(relative_path: str) -> str:
 # ============ 命令白名单（P0-1/P0-3：正则黑名单 -> 结构化校验） ============
 
 # 紧凑必需集：文件 CRUD / 搜索 / 受限解释器 / 杂项，双语系覆盖
-_ALLOWED_COMMANDS = {
+_BASE_ALLOWED_COMMANDS = frozenset({
     # 查看
     "ls", "dir", "cat", "type", "pwd",
     # 文件 CRUD
@@ -83,10 +87,23 @@ _ALLOWED_COMMANDS = {
     "python", "python3", "py", "node",
     # 杂项
     "echo",
-}
+})
+
+# 运行期白名单 = 基础集 ∪ 环境变量扩展。基础集单独留名:副作用分级器只认
+# 基础集定级(环境变量扩展的命令未入副作用册,分级处默认必批)
+_ALLOWED_COMMANDS = set(_BASE_ALLOWED_COMMANDS)
 
 # 解释器命令：参数必须落在 office 内
 _INTERPRETERS = {"python", "python3", "py", "node"}
+
+# find 的执行族参数：-exec/-ok 族以找到的文件为参数执行任意命令，
+# -delete 删文件，-fprint 族写文件——find 段出现这些参数即不再是纯搜索。
+# 审批门分级器共用这份清单（同一参数集在白名单层拒绝、在分级层必批）
+_FIND_HAZARD_FLAGS = frozenset({
+    "-exec", "-execdir", "-ok", "-okdir",          # 执行任意命令
+    "-delete",                                     # 删除
+    "-fprint", "-fprint0", "-fprintf", "-fls",     # 写文件
+})
 
 # 解释器禁止的参数形态：内联代码与模块加载都是任意代码执行入口
 _INTERPRETER_FORBIDDEN_FLAGS = {"-c", "-e", "-m"}
@@ -103,6 +120,10 @@ _PATH_ESCAPE_PATTERN = re.compile(r"(?:^|\s|=)(/|\\|[a-zA-Z]:[\\/])|\.\.")
 
 # 重定向目标约束：> file / < file 的 file 必须是 office 内相对路径
 _REDIRECTION_TARGET_PATTERN = re.compile(r"[<>]{1,2}\s*([^\s;|&]+)")
+
+# cmd 风格 %VAR% 展开（成对出现才算变量，单词内孤立 % 不算）。
+# 命令校验与副作用分级器共用同一正则对象（分级与校验同源的一部分）
+_CMD_VAR_PATTERN = re.compile(r"%[^%\s]{1,}%")
 
 
 def _load_extended_commands():
@@ -123,6 +144,30 @@ def _load_extended_commands():
 
 _EXTENDED_COMMANDS = _load_extended_commands()
 _ALLOWED_COMMANDS |= _EXTENDED_COMMANDS
+
+# 运行时审批扩展：明确不做（审批门 spec Out of Scope——无用户故事，触发时
+# 重议）。域名白名单有"永久允许"铸规则、判定期即时生效的运行期路径
+# （domain_gate），命令白名单的运行期扩展仍只有环境变量显式授权这一条路。
+
+
+# ============ 段解析(命令校验与副作用分级的共同源头) ============
+#
+# shlex 首 token + 段拆分的解析细节只在此处一份:命令白名单(_validate_segment)
+# 与审批门分级器(classify_shell_command)都吃这两个 helper,两边对同一命令
+# 的段划分与首 token 判定永远一致——分级不会把校验要拒的命令判成纯读。
+
+def _parse_segment_head(segment: str) -> list:
+    """shlex 解析单个命令段 → token 列表;解析失败抛 PermissionError。"""
+    try:
+        return shlex.split(segment, posix=False)
+    except ValueError as e:
+        raise PermissionError(f"命令解析失败: {e}")
+
+
+def _segment_head_name(tokens: list) -> str:
+    """段首 token → 命令名:可能带路径前缀(./run.sh / skills/x/y.py),只取文件名。"""
+    head = tokens[0]
+    return os.path.basename(head.replace("\\", "/").strip('"\''))
 
 
 def _is_relative_office_path(arg: str) -> bool:
@@ -175,22 +220,32 @@ def _validate_interpreter_segment(tokens):
             )
 
 
+def _validate_find_segment(tokens):
+    """find 段专用校验：携带执行族参数（-exec/-delete/-fprint 等）即拒绝。
+
+    find 在白名单内（纯搜索），但执行族参数让它以找到的文件为载体执行
+    任意命令/写删文件——段首放行等于整段放行。要执行就用白名单命令明写，
+    不许借道 find。
+    """
+    for arg in tokens[1:]:
+        if arg.lower() in _FIND_HAZARD_FLAGS:
+            raise PermissionError(
+                f"find 参数 '{arg}' 属执行/写删族（-exec/-delete/-fprint 等），已禁用。"
+                f"如需执行命令或写文件，请直接使用对应白名单命令。"
+            )
+
+
 def _validate_segment(segment: str):
     """
     校验单个命令段：解析出首 token（命令名）过白名单；
-    参数做 office 内路径约束；解释器段走更严格的专用校验。
+    参数做 office 内路径约束；解释器段与 find 段走更严格的专用校验。
     """
-    try:
-        tokens = shlex.split(segment, posix=False)
-    except ValueError as e:
-        raise PermissionError(f"命令解析失败: {e}")
+    tokens = _parse_segment_head(segment)
 
     if not tokens:
         return
 
-    # 首 token 可能带路径前缀（./run.sh / skills/x/y.py），只取文件名比对
-    head = tokens[0]
-    head_name = os.path.basename(head.replace("\\", "/").strip('"\''))
+    head_name = _segment_head_name(tokens)
 
     if head_name.lower() not in _ALLOWED_COMMANDS:
         raise PermissionError(
@@ -201,6 +256,9 @@ def _validate_segment(segment: str):
     if head_name.lower() in _INTERPRETERS:
         _validate_interpreter_segment(tokens)
         return
+
+    if head_name.lower() == "find":
+        _validate_find_segment(tokens)
 
     # 非解释器命令：参数里的路径同样不许越界
     for arg in tokens[1:]:
@@ -234,7 +292,7 @@ def _validate_command(command: str):
         )
 
     # 通道封杀：cmd 风格 %VAR% 展开（成对出现才算变量，单词内孤立 % 不算）
-    if re.search(r"%[^%\s]{1,}%", command):
+    if _CMD_VAR_PATTERN.search(command):
         raise PermissionError(
             "检测到 cmd 变量展开语法（%VAR%），已封禁。请使用字面量参数。"
         )

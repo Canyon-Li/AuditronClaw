@@ -85,6 +85,56 @@ class TestBuiltInTools(unittest.TestCase):
             self.assertEqual(saved_content, test_content)
 
 
+class TestProfileThreadIdNormalization(unittest.TestCase):
+    """save_user_profile 的 thread_id 归一化(审批门 05 票)。
+
+    thread_id 由操作员/会话层/基准适配器提供、bake 进画像工具,LLM 的参数面
+    里没有它;基准 id 形如 "前缀/用例号"(bench_pipeline._drive_agent),故
+    拒的是逃逸形态(上跳/盘符/绝对路径/空白)而非一切分隔符——画像落点必须
+    锁死在 memory/profiles/ 内,不给拼出逃逸路径的机会。
+    全量覆写是既有设计,维持不动(审批门的写级管它)。
+    """
+
+    def test_escape_thread_ids_rejected_at_factory(self):
+        """上跳/盘符/绝对路径/空白:组装期即拒(fail fast,不等到首调)"""
+        from auditronclaw.core.tools.builtins import create_profile_tool
+        for bad in ("../evil", "evil/../ok", "..", "C:/x", "C:\\x",
+                    "..\\..\\etc", "/abs", "\\abs", " ", ""):
+            with self.subTest(thread_id=bad):
+                with self.assertRaises(ValueError):
+                    create_profile_tool(bad)
+
+    def test_profile_path_locks_into_profiles_dir(self):
+        """路径形状:合法 id 锁死 profiles 内(含基准的 前缀/用例号 形态);逃逸抛错"""
+        from auditronclaw.core.tools.builtins import _profile_path
+        tmp_memory = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp_memory, True))
+        with patch('auditronclaw.core.tools.builtins.MEMORY_DIR', tmp_memory):
+            self.assertEqual(
+                _profile_path("thread_ok"),
+                os.path.join(tmp_memory, "profiles", "thread_ok.md"))
+            # 基准形态(bench_pipeline._drive_agent 的 前缀/用例号):profiles 内子路径
+            self.assertEqual(
+                os.path.normpath(_profile_path("golden/g001")),
+                os.path.join(tmp_memory, "profiles", "golden", "g001.md"))
+            with self.assertRaises(ValueError):
+                _profile_path("../escape")
+
+    def test_full_overwrite_behavior_unchanged(self):
+        """全量覆写维持:两次写后文件里只有第二份完整内容"""
+        from auditronclaw.core.tools.builtins import create_profile_tool
+        tmp_memory = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp_memory, True))
+        with patch('auditronclaw.core.tools.builtins.MEMORY_DIR', tmp_memory):
+            tool = create_profile_tool("norm_profile_test")
+            tool.invoke({"new_content": "# 第一版\n- 旧偏好"})
+            result = tool.invoke({"new_content": "# 第二版\n- 新偏好"})
+        self.assertEqual(result, "记忆档案已成功覆写更新。新的人设画像已生效。")
+        with open(os.path.join(tmp_memory, "profiles", "norm_profile_test.md"),
+                  encoding="utf-8") as f:
+            self.assertEqual(f.read(), "# 第二版\n- 新偏好")
+
+
 class TestScheduledTasks(unittest.TestCase):
 
     def setUp(self):

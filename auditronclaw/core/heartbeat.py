@@ -5,6 +5,8 @@ import calendar
 from datetime import datetime, timedelta
 from .config import TASKS_FILE
 from .tools.builtins import tasks_lock
+from .approval.gate import TurnOrigin
+from .bus import TurnRequest
 
 async def pacemaker_loop(task_queue: asyncio.Queue, check_interval: int = 10):
     """
@@ -96,4 +98,7 @@ async def pacemaker_loop(task_queue: asyncio.Queue, check_interval: int = 10):
                 f"你设定的定时任务已到期，请立即主动提醒用户或执行动作。\n"
                 f"任务内容：{t['description']}"
             )
-            await task_queue.put(system_msg)
+            # 来源类型化(frozen 信封):心跳回合在构造上即无人值守,
+            # 前缀文本只是给模型看的提示,不再承担来源标记职责
+            await task_queue.put(TurnRequest(text=system_msg,
+                                             origin=TurnOrigin.HEARTBEAT))

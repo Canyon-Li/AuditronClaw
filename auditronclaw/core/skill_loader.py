@@ -9,6 +9,19 @@ from functools import lru_cache
 from .config import SKILLS_DIR
 from .tools.sandbox_tools import execute_office_shell
 
+# 技能工具的 StructuredTool.metadata 键:装配点(审批门)据此判定该工具
+# 走"技能来源"分级路径。键名单一事实源,执行器与分级器共用。
+SKILL_FOLDER_META_KEY = "skill_folder"
+
+
+def expand_skill_command(command: str, folder: str) -> str:
+    """{baseDir} 占位符 → skills/<folder> 实际路径(单一事实源)。
+
+    懒执行器(真正执行)与审批门分级器(判定要不要批)必须用同一个替换,
+    否则"批的是这条命令、跑的是另一条"——技能执行与分级同源的命脉。
+    """
+    return command.replace("{baseDir}", f"skills/{folder}")
+
 
 class DynamicSkillInput(BaseModel):
     mode: str = Field(
@@ -180,8 +193,8 @@ class LazySkillLoader:
             elif mode == "run":
                 if not command:
                     return "错误：在 'run' 模式下，必须提供 command 参数！"
-                
-                actual_cmd = command.replace("{baseDir}", f"skills/{skill_info['folder']}")
+
+                actual_cmd = expand_skill_command(command, skill_info["folder"])
                 return execute_office_shell.invoke({"command": actual_cmd})
             else:
                 return "错误：mode 参数只能是 'help' 或 'run'。"
@@ -196,7 +209,10 @@ class LazySkillLoader:
             func=lazy_runner,
             name=skill_info["name"],
             description=mini_description,
-            args_schema=DynamicSkillInput
+            args_schema=DynamicSkillInput,
+            # 装配点判"技能工具"的依据:审批门据此按其命令做段级分级
+            # (mode=run 最终交给 execute_office_shell,收敛同源)
+            metadata={SKILL_FOLDER_META_KEY: skill_info["folder"]},
         )
     
     def get_all_tools(self, force_rescan: bool = False) -> List[StructuredTool]:

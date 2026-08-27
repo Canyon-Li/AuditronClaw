@@ -208,10 +208,12 @@ class TestReadRecentEmailsSecurity(unittest.TestCase):
     def test_domain_guard_blocks_when_domain_denied(self):
         """守卫先行：IMAP 域不在名单时拒绝读取并落审计（与 01 同一守卫）"""
         provider = FakeMailProvider(build_fixture_emails(count=2))
+        # 三个名单来源全空:默认/环境变量/运行时审批规则(审批门 05 票起规则也是名单源)
         with InjectedProvider(provider), patch.dict(os.environ, self._env_with_creds()), \
                 patch("auditronclaw.core.tools.mail_tool.audit_logger") as mock_logger, \
                 patch.object(domain_gate, "DEFAULT_ALLOWED_DOMAINS", set()), \
-                patch.object(domain_gate, "_EXTENDED_DOMAINS", set()):
+                patch.object(domain_gate, "_EXTENDED_DOMAINS", set()), \
+                patch.object(domain_gate, "load_approval_rule_domains", return_value=[]):
             result = read_recent_emails.invoke({"hours": 24, "max_emails": 10})
         self.assertIn("拒绝", result)
         self.assertEqual(provider.calls, [], "守卫拦截后不得触达传输层")
@@ -227,7 +229,8 @@ class TestReadRecentEmailsSecurity(unittest.TestCase):
         with InjectedProvider(provider), patch.dict(os.environ, self._env_with_creds()), \
                 patch("auditronclaw.core.tools.mail_tool.audit_logger") as mock_logger, \
                 patch.object(domain_gate, "DEFAULT_ALLOWED_DOMAINS", set()), \
-                patch.object(domain_gate, "_EXTENDED_DOMAINS", set()):
+                patch.object(domain_gate, "_EXTENDED_DOMAINS", set()), \
+                patch.object(domain_gate, "load_approval_rule_domains", return_value=[]):
             result = read_recent_emails.invoke({"hours": 24, "max_emails": 10})
         all_logged = "".join(str(c.args) + str(c.kwargs) for c in mock_logger.log_event.call_args_list)
         self.assertNotIn("SECRET_AUTH_CODE", result)

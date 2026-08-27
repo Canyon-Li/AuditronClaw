@@ -69,9 +69,11 @@ class TestDomainGateAudit(unittest.TestCase):
         with patch("auditronclaw.core.tools.feishu_tool.audit_logger") as mock_logger:
             with patch("auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url",
                        return_value="https://open.feishu.cn/open-apis/bot/v2/hook/SECRET_TOKEN"):
-                # 把飞书域从名单里挤出去：清空默认名单使目标域变成名单外
+                # 把飞书域从名单里挤出去：默认/环境变量/运行时审批规则三个
+                # 名单来源全空（05 票起审批规则也是名单源，需一并隔离）
                 with patch.object(domain_gate, "DEFAULT_ALLOWED_DOMAINS", set()), \
-                     patch.object(domain_gate, "_EXTENDED_DOMAINS", set()):
+                     patch.object(domain_gate, "_EXTENDED_DOMAINS", set()), \
+                     patch.object(domain_gate, "load_approval_rule_domains", return_value=[]):
                     result = send_feishu_summary.invoke({"summary_text": "test"})
         self.assertIn("白名单拦截", result)
         denied_logged = False
