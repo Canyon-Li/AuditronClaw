@@ -26,6 +26,7 @@ from auditronclaw.core.session import (
 from auditronclaw.core.approval.gate import (
     ApprovalDecision,
     DecisionSource,
+    REJECT_PHRASE,
     TurnOrigin,
 )
 from auditronclaw.core.approval.rules import ApprovalRule, RuleStore
@@ -384,7 +385,9 @@ def handle_turn_event(event, spinner):
     """回合事件 → TUI 行为映射(spinner 状态机与打印,消费 SessionEngine 事件流)。
 
     与旧 astream 手写解析逐分支等价(等价性由 tests/test_tui_adapter.py 钉住):
-    tool_call→工具态+打印工具名;tool_result→回思考态;final reply→停
+    tool_call→工具态+打印工具名;tool_result→回思考态,审批门拒绝原文
+    照印(2026-08-27 真机发现:模型转述会复读 thread 历史里的旧话术,
+    操作员须直读门对 agent 说了什么,不赌转述);final reply→停
     spinner+打印;非 final reply 不显示(保现状);turn_end→行距收尾。
     """
     if isinstance(event, ToolCall):
@@ -400,6 +403,12 @@ def handle_turn_event(event, spinner):
         cprint('')
     elif isinstance(event, ToolResult):
         spinner.is_tool_calling = False
+        if event.result.startswith(f"❌ {REJECT_PHRASE}"):
+            # 门的话术原文照印:agent 收到的拒绝理由与它的转述可以不一致
+            # (真机两例:tool_result 如实,回复却复读历史旧话术)——拒绝
+            # 是否如实呈现,操作员以此行为准,不赌模型转述
+            cprint(f"  \033[31m{event.result}\033[0m")
+            cprint('')
     elif isinstance(event, Reply):
         if event.final:
             spinner.is_spinning = False

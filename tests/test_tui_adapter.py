@@ -3,7 +3,9 @@
 entry/main.py 的 agent_worker 从手写 astream 解析切到消费 SessionEngine
 回合事件;本文件钉住事件→行为映射,与旧解析逐分支等价:
 - ToolCall → spinner 工具态 + 打印工具名
-- ToolResult → spinner 回思考态,不打印
+- ToolResult → spinner 回思考态,不打印;审批门拒绝原文照印(2026-08-27
+  真机发现:模型的转述会复读 thread 历史里的旧话术,操作员须直读门对
+  agent 说了什么,不赌转述)
 - Reply(final) → 停 spinner + 打印(多行缩进格式照旧)
 - Reply(非 final,content 与 tool_calls 并存) → 不显示(保现状)
 - TurnEnd → 停 spinner + 行距收尾
@@ -27,6 +29,7 @@ from auditronclaw.core.session import (
     TurnEnd,
     TurnTrajectory,
 )
+from auditronclaw.core.approval.gate import REJECT_PHRASE
 
 import entry.main as tui_main
 
@@ -67,6 +70,25 @@ class TestEventBehaviorMapping(unittest.TestCase):
         self.assertFalse(spinner.is_tool_calling, "工具回传:spinner 回思考态")
         self.assertTrue(spinner.is_spinning, "回合未收尾,spinner 不停")
         self.assertEqual(len(calls), 2, "工具回传本身不打印(保现状)")
+
+    def test_gate_rejection_tool_result_printed_verbatim(self):
+        """审批门拒绝的 tool_result 原文照印:tool_result 如实、模型转述却
+        复读历史旧话术("无人值守…"两例逐字雷同,2026-08-27 真机审计定位),
+        操作员须直读门对 agent 说了什么——拒绝分案话术照印,转述漂移时
+        有据可对;普通工具回传仍不打印"""
+        rejection = (f"❌ {REJECT_PHRASE}：工具 write_office_file 的本次调用属于"
+                     "必批副作用（write：写类副作用）。操作员已明确拒绝本次调用，未执行。")
+        spinner, calls = _drive([
+            ToolCall(name="write_office_file", args={}),
+            ToolResult(tool="write_office_file", result=rejection),
+        ])
+        self.assertFalse(spinner.is_tool_calling, "工具回传:spinner 回思考态")
+        self.assertEqual(calls, [
+            ("  ●\033[38;5;51m Tool Call: \033[0mwrite_office_file",),
+            ('',),
+            (f"  \033[31m{rejection}\033[0m",),
+            ('',),
+        ], "拒绝原文整条照印(红字),后随行距空行")
 
     def test_final_reply_stops_spinner_and_prints_formatted(self):
         spinner, calls = _drive([Reply(content="第一行\n第二行", final=True)])
