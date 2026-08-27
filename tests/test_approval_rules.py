@@ -25,6 +25,7 @@ from auditronclaw.core.approval.classifier import (
     classify_shell_command,
     classify_tool_call,
 )
+from auditronclaw.core.tools.sandbox_tools import SYS_OS
 
 
 def _assess(risk_class, targets=()):
@@ -134,12 +135,23 @@ class TestClassifierTargets(unittest.TestCase):
         self.assertEqual(assess.targets, ("office/scripts/a.py",))
 
     def test_write_target_same_normalization_as_execution(self):
-        """带冗余 office/ 前缀与反斜杠的路径,目标归一与执行落点一致"""
-        for filepath in ("office/scripts/a.py", "scripts\\a.py", "office\\scripts\\a.py"):
+        """带冗余 office/ 前缀与反斜杠的路径,目标归一与执行落点一致。
+
+        反斜杠剥前缀是 Windows 语义(_normalize_office_path 文档):非
+        Windows 下 \ 是合法文件名字符,office\scripts\a.py 不剥前缀、
+        如实落在 office 内层——期望随平台分案,CI(Linux)与本地
+        (Windows)同一断言各自成立(2026-08-27 CI 独红发现)。
+        """
+        cases = {"office/scripts/a.py": "office/scripts/a.py",
+                 "scripts\\a.py": "office/scripts/a.py",
+                 "office\\scripts\\a.py": ("office/scripts/a.py"
+                                           if SYS_OS == "Windows"
+                                           else "office/office/scripts/a.py")}
+        for filepath, expected in cases.items():
             with self.subTest(filepath=filepath):
                 assess = classify_tool_call("write_office_file",
                                             {"filepath": filepath, "content": "x"})
-                self.assertEqual(assess.targets, ("office/scripts/a.py",))
+                self.assertEqual(assess.targets, (expected,))
 
     def test_profile_tool_targets_profile_dir(self):
         """画像写:目标=memory/profiles(会话内具体文件由工具自析)"""
