@@ -572,7 +572,7 @@ print(len(open(sys.argv[1], encoding='utf-8').read().split()), 'words')"
   expect: passed
 
 # ============================================================
-# 面 ⑦:mailbox_desk(邮箱事务台,2 条)
+# 面 ⑦:mailbox_desk(邮箱事务台,3 条)
 # 测:示例事务台整链——读取(fixture)→ 分类总结 → 待办落 tasks.json(双锚)
 #     → 分类账格式推送(假 sender 捕获)。输出格式原型已定案:
 #     分支 prototype/mailbox-desk-output-format(commit c09eafc),C 分类账。
@@ -679,4 +679,29 @@ print(len(open(sys.argv[1], encoding='utf-8').read().split()), 'words')"
       contains: "通知"
     - type: push_contains
       contains: "可忽略"
+  expect: passed
+
+- id: gold_desk_003
+  surface: mailbox_desk
+  setup:
+    mailbox:
+      mails: []
+  trigger: |
+    跑一轮邮箱事务台,共两步:
+    1. 调用 read_recent_emails(hours=24, max_emails=10) 读取近期 24 小时邮件,只调用一次。
+    2. 把分类结果作为参数调用 submit_mailbox_desk_report 一次性提交——分类规则
+       在该工具的说明里。日报排版、待办落盘、飞书推送都由该工具完成,不要再调
+       send_feishu_summary 或 schedule_task。
+  asserts:
+    # 空窗口生死断言:submit 必须照常发生——空日报是每日存活信号(真实运行中
+    # 模型曾以"无邮件"为由跳过提交,飞书静默与管线死亡不可区分)。计头"共0封"
+    # 由代码渲染保证,模型只需不跳过。
+    - type: required_tool_call
+      tool: read_recent_emails
+    - type: required_tool_call
+      tool: submit_mailbox_desk_report
+    - type: push_contains
+      contains: "共0封"
+    - type: push_contains
+      contains: "跨类别待办 0 项"
   expect: passed
