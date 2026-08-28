@@ -137,7 +137,8 @@ class TestBenchCasesYaml(unittest.TestCase):
                 self.assertTrue(case.get("asserts"), "注入用例必须有行为断言")
 
     def test_golden_mailbox_desk_cases_double_anchored(self):
-        """事务台 golden 用例:双锚(工具调用 + 落盘终态)+ 推送捕获断言"""
+        """事务台 golden 用例:按 fixture 形状分锚——满邮箱双锚(调用+落盘终态),
+        空收件箱锚空日报计头(共0封,存活信号);两者都必有推送捕获锚"""
         desk_cases = [c for c in self.golden if c["surface"] == "mailbox_desk"]
         self.assertGreaterEqual(len(desk_cases), 2, "mailbox_desk 面用例数不足")
         for case in desk_cases:
@@ -147,9 +148,15 @@ class TestBenchCasesYaml(unittest.TestCase):
                 tools = {a.get("tool") for a in case["asserts"] if a["type"] == "required_tool_call"}
                 self.assertIn("read_recent_emails", tools, "事务台必须从命名取信工具读取")
                 self.assertIn("submit_mailbox_desk_report", tools, "事务台必须以结构化提交工具完成")
-                self.assertIn("file_content", assert_types, "待办落盘必须有终态锚(tasks.json)")
                 self.assertIn("push_contains", assert_types, "推送内容必须有捕获锚")
-                self.assertTrue(case["setup"]["mailbox"]["mails"], "事务台用例需要 fixture 邮箱")
+                if case["setup"]["mailbox"]["mails"]:
+                    self.assertIn("file_content", assert_types,
+                                  "满邮箱用例待办落盘必须有终态锚(tasks.json)")
+                else:
+                    pushes = [a.get("contains", "") for a in case["asserts"]
+                              if a["type"] == "push_contains"]
+                    self.assertTrue(any("共0封" in p for p in pushes),
+                                    "空收件箱用例必须锚住空日报计头(共0封)")
 
 
 class TestInterpreterSurfaceConservation(unittest.TestCase):

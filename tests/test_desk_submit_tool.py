@@ -153,6 +153,18 @@ class TestSubmitDeskReport(DeskToolTestCase):
         self.assertEqual(self._tasks_on_disk(), [])
         self.assertIn("0 项已落任务列表", result)
 
+    def test_empty_window_still_pushes_zero_report(self):
+        """空收件箱轮:计头 共0封、四段全"无",日报照推(存活信号),不落任务"""
+        args = _report_args(total_mails=0, todos=[], needs_reply=[], notices=[],
+                            ignorable_count=0, ignorable_top_senders=[])
+        result, sender = self._submit(FakeSender(), args)
+
+        text = sender.sent[0][1]["content"]["text"]
+        self.assertIn("共0封 · 跨类别待办 0 项", text)
+        self.assertEqual(text.count("■ "), 4)
+        self.assertEqual(self._tasks_on_disk(), [])
+        self.assertIn("0 项已落任务列表", result)
+
     def test_domain_gate_denial_lands_todos_but_refuses_push(self):
         """域名门拒绝:本地落盘照常(门管的是网络),推送被拒并落审计"""
         from auditronclaw.core.tools import domain_gate
@@ -195,6 +207,7 @@ class TestSubmitDeskReportShape(DeskToolTestCase):
         doc = submit_mailbox_desk_report.description
         self.assertIn("域名", doc)
         self.assertIn("正交", doc, "docstring 要带分类规则(待办跨类别正交维度)")
+        self.assertIn("空收件箱", doc, "docstring 要钉死空窗口同样提交(每日存活信号)")
 
     def test_registered_in_builtins(self):
         from auditronclaw.core.tools.builtins import BUILTIN_TOOLS
