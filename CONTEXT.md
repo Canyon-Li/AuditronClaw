@@ -105,3 +105,7 @@ _Avoid_: 消息、日志（那是审计流的词）
 **回合轨迹**:
 一个回合内按序收集的 tool_calls、tool_results 与 reply 的结构化记录，基准判定与 Reflector 核对的事实载体。
 _Avoid_: 历史、transcript
+
+**Web 终端**:
+会话引擎的第三类适配器：浏览器呈现回合事件与审批交互——approval_request 呈现、ApprovalDecision 回传，风险判断全在审批门，适配器零分级逻辑。单操作员、localhost 绑定、无账号体系，同屏只读审计流。价值定位是审批门的展示面。
+_Avoid_: 通用聊天界面、控制台
