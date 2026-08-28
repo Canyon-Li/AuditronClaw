@@ -15,38 +15,46 @@ class TestHeartbeatPacemaker(unittest.TestCase):
     def setUp(self):
         """每个测试前创建临时任务文件"""
         self.temp_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.json')
+        # Windows:被句柄占用的文件无法被 os.replace 原子替换(WinError 5)
+        self.temp_file.close()
         self.original_tasks_file = None
-        
+
         # 保存原始 TASKS_FILE 路径
         import auditronclaw.core.config
         self.original_tasks_file = auditronclaw.core.config.TASKS_FILE
-        
+
         # 设置临时任务文件
         auditronclaw.core.config.TASKS_FILE = self.temp_file.name
-        
+
         # 同时 patch heartbeat 模块中的引用
         import auditronclaw.core.heartbeat
         auditronclaw.core.heartbeat.TASKS_FILE = self.temp_file.name
 
+        # 写侧经 builtins._write_tasks(原子替换),落点随 builtins.TASKS_FILE——
+        # 三处引用都指向同一临时文件,别让写侧漏到真实 workspace
+        import auditronclaw.core.tools.builtins
+        auditronclaw.core.tools.builtins.TASKS_FILE = self.temp_file.name
+
     def tearDown(self):
-        """每个测试后清理临时文件"""
-        self.temp_file.close()
+        """每个测试后清理临时文件（句柄已在 setUp 关闭）"""
         if os.path.exists(self.temp_file.name):
             os.unlink(self.temp_file.name)
-        
+
         # 恢复原始路径
         import auditronclaw.core.config
         auditronclaw.core.config.TASKS_FILE = self.original_tasks_file
-        
+
         import auditronclaw.core.heartbeat
         auditronclaw.core.heartbeat.TASKS_FILE = self.original_tasks_file
+
+        import auditronclaw.core.tools.builtins
+        auditronclaw.core.tools.builtins.TASKS_FILE = self.original_tasks_file
 
     def test_no_tasks_file(self):
         """测试任务文件不存在时的行为"""
         from auditronclaw.core.heartbeat import pacemaker_loop
         
-        # 删除临时文件模拟不存在(先关句柄:Windows 不允许删除打开中的文件)
-        self.temp_file.close()
+        # 删除临时文件模拟不存在(句柄已在 setUp 关闭,Windows 才允许删除)
         os.unlink(self.temp_file.name)
         
         # 运行一个周期（不等待实际间隔）
@@ -293,25 +301,34 @@ class TestPacemakerLoopDailyDeskTask(unittest.TestCase):
     def setUp(self):
         import auditronclaw.core.config
         import auditronclaw.core.heartbeat
+        import auditronclaw.core.tools.builtins
 
         fd, path = tempfile.mkstemp(suffix=".json")
         os.close(fd)
         self.temp_path = path
         self._orig_config = auditronclaw.core.config.TASKS_FILE
         self._orig_heartbeat = auditronclaw.core.heartbeat.TASKS_FILE
-        # 与 TestHeartbeatPacemaker 同法:临时任务文件,不碰真实 workspace
+        # 与 TestHeartbeatPacemaker 同法:临时任务文件,不碰真实 workspace。
+        # 写侧经 builtins._write_tasks,三处引用须同指一个临时文件
+        self._orig_builtins = auditronclaw.core.tools.builtins.TASKS_FILE
         auditronclaw.core.config.TASKS_FILE = path
         auditronclaw.core.heartbeat.TASKS_FILE = path
+        auditronclaw.core.tools.builtins.TASKS_FILE = path
 
     def tearDown(self):
         import auditronclaw.core.config
         import auditronclaw.core.heartbeat
+        import auditronclaw.core.tools.builtins
 
         auditronclaw.core.config.TASKS_FILE = self._orig_config
         auditronclaw.core.heartbeat.TASKS_FILE = self._orig_heartbeat
+        auditronclaw.core.tools.builtins.TASKS_FILE = self._orig_builtins
         # Windows:文件被占用时删除会 WinError 32,先确认句柄已关
         if os.path.exists(self.temp_path):
             os.unlink(self.temp_path)
+        # _write_tasks 的 tmp 残留(崩溃路径)一并清掉
+        if os.path.exists(self.temp_path + ".tmp"):
+            os.unlink(self.temp_path + ".tmp")
 
     def _write_due_daily_task(self):
         """写入一条刚到期的 daily 事务台任务,返回其 target_time。"""

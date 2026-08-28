@@ -4,7 +4,7 @@ import asyncio
 import calendar
 from datetime import datetime, timedelta
 from .config import TASKS_FILE
-from .tools.builtins import tasks_lock
+from .tools.builtins import tasks_lock, _write_tasks
 from .approval.gate import TurnOrigin
 from .bus import TurnRequest
 
@@ -87,8 +87,7 @@ async def pacemaker_loop(task_queue: asyncio.Queue, check_interval: int = 10):
             #将还没到触发时间的任务和续期后的循环任务写回文件，覆盖原有内容
             if triggered_tasks:
                 try:
-                    with open(TASKS_FILE, "w", encoding="utf-8") as f:
-                        json.dump(pending_tasks, f, ensure_ascii=False, indent=2)
+                    _write_tasks(pending_tasks)
                 except Exception:
                     pass
 

@@ -200,14 +200,37 @@ def calculator(expression: str) -> str:
         return f"计算出错，请检查表达式格式。错误信息: {str(e)}"
 
 
+def _write_tasks(tasks) -> None:
+    """tasks.json 原子落盘:同目录 tmp 写入 → flush+fsync → os.replace。
+
+    威胁模型:进程崩溃与断电把队列文件写成半截 JSON——tasks.json 是
+    定时任务队列的唯一样本(排程、删除、修改、心跳续期都写它;事务台
+    从邮件提炼的待办也落在这里),半截即整体失明。先写同目录临时文件、
+    fsync 后原子替换,任意时刻断电,磁盘上要么是完整旧文件、要么是完整新文件。
+    目录 fsync(防 replace 的目录项本身未落盘)在 Windows 上不可行,
+    不追——最坏情形退化为旧文件多活一次,由任务幂等消化。
+    只修文件损坏,不做"先写回再触发":那会把崩溃窗口换成漏执行,
+    漏一天日报即存活信号丢失,比低概率重复触发伤;重复触发维持
+    "低概率,自用可容忍"。
+    锁约定:调用方须已持有 tasks_lock——本函数不自取(非重入锁,
+    自取即把持锁调用方挂死)。
+    """
+    with open(TASKS_FILE + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(tasks, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(TASKS_FILE + ".tmp", TASKS_FILE)
+
+
 def _append_task(target_time: str, description: str, repeat: str = None, repeat_count: int = None) -> None:
     """
     向任务队列文件追加一条任务（线程锁内读-改-写）。
 
-    待办落盘的唯一写入口：schedule_task 与事务台提交工具共用，
+    追加待办条目的唯一入口：schedule_task 与事务台提交工具共用，
     保证 tasks.json 的条目形状（id/target_time/description/repeat/repeat_count）
     始终一致——不管待办是人定的还是事务台提炼的。
-    读取/写入异常向上抛，由调用方决定如何向 LLM 结构化报告。
+    落盘走 _write_tasks（原子替换）；读取/写入异常向上抛，
+    由调用方决定如何向 LLM 结构化报告。
     """
     with tasks_lock:
         tasks = []
@@ -229,8 +252,7 @@ def _append_task(target_time: str, description: str, repeat: str = None, repeat_
         })
 
         try:
-            with open(TASKS_FILE, "w", encoding="utf-8") as f:
-                json.dump(tasks, f, ensure_ascii=False, indent=2)
+            _write_tasks(tasks)
         except Exception as e:
             raise RuntimeError(f"写入任务队列异常 {str(e)}")
 
@@ -345,9 +367,8 @@ def delete_scheduled_task(task_id: str) -> str:
             if len(new_tasks) == len(tasks):
                 return f"删除失败：未找到 ID 为 {task_id} 的任务。"
             
-            with open(TASKS_FILE, "w", encoding="utf-8") as f:
-                json.dump(new_tasks, f, ensure_ascii=False, indent=2)
-            
+            _write_tasks(new_tasks)
+
             return f" 任务 [ID: {task_id}] 已成功取消。"
         except Exception as e:
             return f"操作异常：{str(e)}"
@@ -400,9 +421,8 @@ def modify_scheduled_task(task_id: str, new_time: str = None, new_description: s
             if not found:
                 return f"修改失败：未找到 ID 为 {task_id} 的任务。"
             
-            with open(TASKS_FILE, "w", encoding="utf-8") as f:
-                json.dump(tasks, f, ensure_ascii=False, indent=2)
-                
+            _write_tasks(tasks)
+
             return f" 任务 [ID: {task_id}] 已成功更新。"
         except ValueError:
             return "修改失败：时间格式错误。"
