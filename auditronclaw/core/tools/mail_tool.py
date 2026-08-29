@@ -25,7 +25,7 @@ assert IMAP_DOMAIN in DEFAULT_ALLOWED_DOMAINS, "邮箱工具绑定的目标域�
 _BODY_MAX_CHARS = 500
 
 
-# 传输层注入缝（接缝 B）：模块内可替换的 provider，测试与基准注入 fixture
+# 传输层注入点：模块内可替换的 provider，测试与基准注入 fixture
 # 邮箱文件实现，零真实网络。默认 None = 生产通道（_imap_provider）。
 # 不作为工具参数——LLM 的参数面里没有它。
 _active_provider: Optional[Callable] = None
@@ -145,7 +145,7 @@ def _imap_provider(config: dict, hours: int, max_emails: int) -> list:
 
 
 # 出站通道登记（03 票）：与传输定义同文件。哨兵深度=真套接字边界
-# imaplib.IMAP4_SSL，不是注入缝 _active_provider——只换注入缝会浅一层：
+# imaplib.IMAP4_SSL，不是注入点 _active_provider——只换注入点会浅一层：
 # 生产 provider 允许被测（mock 传输层走全流程的用例合法），守门只挡真实连接。
 register_egress_channel(EgressChannel(
     name="imap_ssl",

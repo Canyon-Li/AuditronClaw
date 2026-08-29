@@ -254,7 +254,7 @@ def wrap_tool(
 ) -> StructuredTool:
     """给单个工具包上门:同名同 schema,调用先过 分级→规则→问人 链。
 
-    hooks(03 票)是观察缝:before 见每次经门调用的尝试,after/on_error 只
+    hooks(03 票)是观察点:before 见每次经门调用的尝试,after/on_error 只
     见工具体执行段——hooks 只观察与记录,无否决权。无 hooks 时行为不变。
     工具体抛 DomainDenied 时,由本 wrapper 统一格式落拒绝回执并返回拒绝
     话术(回执单源,格式在 tools/domain_gate.py)。
@@ -384,7 +384,7 @@ def wrap_all_tools(
     skill(按命令收敛);其余 → builtin(查副作用册)。
     不做"已包装"短路:包装标记写在工具元数据里,而元数据来自被守对象
     (外接工具可自带任意元数据),守门判定不能握在被守者手里。
-    hooks 原样传给每个包装件(同一观察缝盖全部注册工具)。
+    hooks 原样传给每个包装件(同一观察点盖全部注册工具)。
     """
     wrapped = []
     for t in tools:

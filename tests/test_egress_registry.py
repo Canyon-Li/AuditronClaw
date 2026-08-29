@@ -1,8 +1,8 @@
 """出站通道注册表与 meta-test 强制（03 票 C）。
 
 出站通道 = 命名网络工具的生产传输路径。注册表：名 → (getter, setter)，
-每通道自带哨兵深度——feishu 守注入缝 _http_sender（它本身就是网络边界），
-IMAP 守真套接字边界 imaplib.IMAP4_SSL（不得降级为只换注入缝，那会浅一层：
+每通道自带哨兵深度——feishu 守注入点 _http_sender（它本身就是网络边界），
+IMAP 守真套接字边界 imaplib.IMAP4_SSL（不得降级为只换注入点，那会浅一层：
 生产 provider 允许被测，守门只挡真实连接）。conftest 遍历本注册表布哨。
 
 meta-test 是强制力：import 网络库的模块必须在注册表有条目，否则红——
@@ -104,8 +104,8 @@ class TestEgressRegistryShape(unittest.TestCase):
         self.assertEqual(self._channel("imap_ssl").module,
                          mail_tool.__name__)
 
-    def test_feishu_sentinel_depth_at_injection_seam(self):
-        """feishu 哨兵深度：注入缝 _http_sender 本身就是网络边界——
+    def test_feishu_sentinel_depth_at_injection_point(self):
+        """feishu 哨兵深度：注入点 _http_sender 本身就是网络边界——
         setter 换装必须落在 _http_sender 上（测试注入走 _active_sender，
         哨兵换的是生产通道原函数）"""
         ch = self._channel("feishu_webhook")
@@ -120,8 +120,8 @@ class TestEgressRegistryShape(unittest.TestCase):
         self.assertIs(feishu_tool._http_sender, original, "退出还原生产通道")
 
     def test_imap_sentinel_depth_at_socket_boundary(self):
-        """IMAP 哨兵深度：真套接字边界 imaplib.IMAP4_SSL，不是注入缝
-        _active_provider——降级为只换注入缝会浅一层（生产 provider 允许
+        """IMAP 哨兵深度：真套接字边界 imaplib.IMAP4_SSL，不是注入点
+        _active_provider——降级为只换注入点会浅一层（生产 provider 允许
         被测，守门只挡真实连接）"""
         import imaplib
         ch = self._channel("imap_ssl")

@@ -107,7 +107,7 @@ def create_agent_app(
     # 人来源回合规则未命中时 interrupt 问人(03 票),答"永久允许"即经
     # rule_store 铸规则;心跳/基准/未声明来源构造上不问人,直接拒。
     rule_store = RuleStore()
-    # hooks 装配在包装单点(03 票):全部注册工具共用同一观察缝,
+    # hooks 装配在包装单点(03 票):全部注册工具共用同一观察点,
     # AuditReceiptHook 是回执单源(成功/错误回执由工具登记、hook 统一落盘)
     gated_tools = wrap_all_tools(actual_tools, thread_id=thread_id,
                                  extra_names=extra_names,

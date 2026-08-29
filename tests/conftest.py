@@ -8,7 +8,7 @@ load_dotenv），把 7 字符探针文本真实推到作者飞书群 60 次（sy
 收尾断言，不能指望异常自己传出工具层。
 
 守卫层级随通道定义登记（每通道自带哨兵深度，见 auditronclaw/core/tools/
-egress.py）：feishu 守注入缝 _http_sender（它本身就是网络边界）；IMAP 守真
+egress.py）：feishu 守注入点 _http_sender（它本身就是网络边界）；IMAP 守真
 套接字边界 imaplib.IMAP4_SSL（生产 provider 允许被测，守门只挡真实连接）。
 新增通道在传输定义同文件登记，漏登记由 meta-test 判红
 （test_egress_registry）。触碰账只记通道名——参数里可能有凭据（webhook

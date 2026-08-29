@@ -1,4 +1,4 @@
-"""工具调用 hooks：审批门 wrapper 的观察缝（03 票 C）。
+"""工具调用 hooks：审批门 wrapper 的观察点（03 票 C）。
 
 安全语义长在包装单点：DomainDenied 的拒绝回执由 gate.wrap_tool 统一落
 （格式单源在 tools/domain_gate.py），成功回执由本模块的 AuditReceiptHook
