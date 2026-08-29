@@ -1,11 +1,13 @@
+import imaplib
 import json
 import os
 from datetime import datetime, timedelta
 from typing import Callable, Optional
 
 from .base import auditronclaw_tool
-from .domain_gate import check_domain_allowed, DEFAULT_ALLOWED_DOMAINS
-from ..logger import audit_logger
+from .domain_gate import require_domain, DEFAULT_ALLOWED_DOMAINS
+from .egress import EgressChannel, register_egress_channel
+from ..approval.hooks import Receipt
 
 # ============ 邮箱读取命名工具 ============
 #
@@ -23,7 +25,7 @@ assert IMAP_DOMAIN in DEFAULT_ALLOWED_DOMAINS, "邮箱工具绑定的目标域�
 _BODY_MAX_CHARS = 500
 
 
-# 传输层注入缝（接缝 B）：模块内可替换的 provider，测试与基准注入 fixture
+# 传输层注入点：模块内可替换的 provider，测试与基准注入 fixture
 # 邮箱文件实现，零真实网络。默认 None = 生产通道（_imap_provider）。
 # 不作为工具参数——LLM 的参数面里没有它。
 _active_provider: Optional[Callable] = None
@@ -102,7 +104,6 @@ def _imap_provider(config: dict, hours: int, max_emails: int) -> list:
     store/exp/delete 的调用路径，邮件不会被标记已读或删除。
     SINCE 只能精确到天，小时级窗口在拉回后按 Date 头二次过滤。
     """
-    import imaplib
     from email.utils import parsedate_to_datetime
 
     cutoff = datetime.now() - timedelta(hours=hours)
@@ -141,6 +142,19 @@ def _imap_provider(config: dict, hours: int, max_emails: int) -> list:
                 "body": _extract_body(msg),
             })
         return mails
+
+
+# 出站通道登记（03 票）：与传输定义同文件。哨兵深度=真套接字边界
+# imaplib.IMAP4_SSL，不是注入点 _active_provider——只换注入点会浅一层：
+# 生产 provider 允许被测（mock 传输层走全流程的用例合法），守门只挡真实连接。
+register_egress_channel(EgressChannel(
+    name="imap_ssl",
+    module=__name__,
+    getter=lambda: imaplib.IMAP4_SSL,
+    setter=lambda transport: setattr(imaplib, "IMAP4_SSL", transport),
+    guard="守真套接字边界 imaplib.IMAP4_SSL（生产 provider 允许被测，守门"
+          "只挡真实连接）；测生产 provider 请 mock imaplib.IMAP4_SSL 传输层",
+))
 
 
 def load_fixture_provider(path: str) -> Callable:
@@ -196,31 +210,19 @@ def read_recent_emails(hours: int = 24, max_emails: int = 10) -> str:
     参数 hours 为时间窗（小时，默认 24 即近期一天）；max_emails 为数量上限
     （默认 10），超限积压会被截断并附计数提示，不会撑爆上下文。
     """
+    # 0. 凭据前置检查：未配置时不碰网络，返回结构化错误
+    config = get_mail_credentials()
+    if not config["account"] or not config["password"]:
+        return (
+            "❌ 读取失败：邮箱凭据未配置（MAIL_ACCOUNT / MAIL_IMAP_PASSWORD）。"
+            "请部署者在宿主机 .env 中配置后再试。"
+        )
+
+    # 1. 域名门（03 票）：名单外抛 DomainDenied，由审批门 wrapper 统一格式
+    #    落拒绝回执并返回拒绝话术——检查留在工具体内，回执不落工具体
+    require_domain(IMAP_DOMAIN, tool_name=read_recent_emails.name, action="读取")
+
     try:
-        # 0. 凭据前置检查：未配置时不碰网络，返回结构化错误
-        config = get_mail_credentials()
-        if not config["account"] or not config["password"]:
-            return (
-                "❌ 读取失败：邮箱凭据未配置（MAIL_ACCOUNT / MAIL_IMAP_PASSWORD）。"
-                "请部署者在宿主机 .env 中配置后再试。"
-            )
-
-        # 1. 域名白名单守卫：先于传输层执行，名单外拒绝并落审计
-        if not check_domain_allowed(IMAP_DOMAIN):
-            audit_logger.log_event(
-                thread_id="system",
-                event="system_action",
-                content=(
-                    f"域名白名单拦截：工具 {read_recent_emails.name} 目标域 "
-                    f"'{IMAP_DOMAIN}' 不在允许名单内，读取被拒绝。"
-                    "如需扩展，请设置 AUDITRONCLAW_ALLOWED_DOMAINS 环境变量。"
-                ),
-            )
-            return (
-                f"❌ 读取失败：读取请求被拒绝——目标域名 '{IMAP_DOMAIN}' 不在允许名单内，"
-                "本次读取已被域名白名单拦截并记录审计。"
-            )
-
         # 2. 传输层：生产真实 IMAP / 测试注入的 fixture provider（零网络）。
         # provider 约定新在前；窗口过滤与数量上限都由工具层强制，不信任 provider 自律。
         provider = _active_provider if _active_provider is not None else _imap_provider
@@ -233,16 +235,6 @@ def read_recent_emails(hours: int = 24, max_emails: int = 10) -> str:
         mails.sort(key=lambda m: m["date"] if m.get("date") else cutoff, reverse=True)
         total = len(mails)
         shown = mails[:max_emails]
-
-        # 3. 脱敏回执：只有窗口/计数，无账号无授权码
-        audit_logger.log_event(
-            thread_id="system",
-            event="system_action",
-            content=(
-                f"邮箱读取回执：目标域 {IMAP_DOMAIN}，窗口 {hours} 小时，"
-                f"取回 {total} 封，展示 {len(shown)} 封。"
-            ),
-        )
 
         header = f"近期 {hours} 小时邮箱邮件，共 {total} 封。"
         if total > len(shown):
@@ -259,14 +251,18 @@ def read_recent_emails(hours: int = 24, max_emails: int = 10) -> str:
             body = (m.get("body") or "")[:_BODY_MAX_CHARS]
             lines.append(body)
             lines.append("")
-        return _EXTERNAL_DATA_FRAME + "\n".join(lines)
+        # 3. 脱敏回执（03 票）：只有窗口/计数，无账号无授权码。内容随返回值
+        #    走，落盘由 wrapper 的 AuditReceiptHook 单源执行
+        return Receipt(
+            _EXTERNAL_DATA_FRAME + "\n".join(lines),
+            f"邮箱读取回执：目标域 {IMAP_DOMAIN}，窗口 {hours} 小时，"
+            f"取回 {total} 封，展示 {len(shown)} 封。",
+        )
     except Exception as e:
         # 结构化错误兜底：不把裸异常抛给 LLM。只报错误类型不透传 str(e)——
         # 登录类异常的 message 常内嵌账号与授权码，透传即凭据泄露。
         error_name = type(e).__name__
-        audit_logger.log_event(
-            thread_id="system",
-            event="system_action",
-            content=f"邮箱读取失败：目标域 {IMAP_DOMAIN}，错误 {error_name}。",
+        return Receipt(
+            f"❌ 读取失败（{error_name}）。请稍后重试。",
+            f"邮箱读取失败：目标域 {IMAP_DOMAIN}，错误 {error_name}。",
         )
-        return f"❌ 读取失败（{error_name}）。请稍后重试。"

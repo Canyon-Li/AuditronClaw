@@ -102,6 +102,55 @@ def check_domain_allowed(domain: str) -> bool:
                for pattern in _APPROVAL_DOMAIN_PATTERNS)
 
 
+# ============ 域名拒绝的异常路径（03 票 C） ============
+#
+# 工具体内那行检查保留原位（可见性/审计性不丢），但拒绝时抛类型化异常，
+# 由审批门 wrapper 统一格式落拒绝回执——工具从"检查 + 两段回执"缩为
+# "一行 require_domain(...) + 传输"。拒绝话术与审计回执在此单源定义，
+# 与手写三件套时代逐字一致。
+
+class DomainDenied(Exception):
+    """域名白名单拒绝：命名工具绑定的目标域不在名单内。
+
+    携带拒绝三要素（工具名/目标域/动作），是回执单源的原料；由 wrapper
+    捕获后转拒绝结果，不作为传输错误处理。
+    """
+
+    def __init__(self, tool_name: str, domain: str, action: str):
+        super().__init__(f"{tool_name}:{domain}:{action}被域名白名单拒绝")
+        self.tool_name = tool_name
+        self.domain = domain
+        self.action = action
+
+
+def require_domain(domain: str, *, tool_name: str, action: str) -> None:
+    """域名门（工具体内的一行）：目标域不在名单内即抛 DomainDenied。
+
+    action 是人读的动作词（读取/推送），进拒绝话术与回执；先于传输层
+    执行，代码强制而非提示词约定。
+    """
+    if not check_domain_allowed(domain):
+        raise DomainDenied(tool_name=tool_name, domain=domain, action=action)
+
+
+def domain_denied_audit_content(denied: DomainDenied) -> str:
+    """拒绝回执（审计事件 content）：单源定义，逐字沿用三件套时代格式。"""
+    return (
+        f"域名白名单拦截：工具 {denied.tool_name} 目标域 "
+        f"'{denied.domain}' 不在允许名单内，{denied.action}被拒绝。"
+        "如需扩展，请设置 AUDITRONCLAW_ALLOWED_DOMAINS 环境变量。"
+    )
+
+
+def domain_denied_reply(denied: DomainDenied) -> str:
+    """拒绝话术（tool_result 返回）：单源定义，逐字沿用三件套时代格式。"""
+    return (
+        f"❌ {denied.action}失败：{denied.action}请求被拒绝——"
+        f"目标域名 '{denied.domain}' 不在允许名单内，"
+        f"本次{denied.action}已被域名白名单拦截并记录审计。"
+    )
+
+
 # 进程启动时加载一次环境变量扩展（与 shell 命令白名单的导入期加载同构）。
 # 不经 refresh_extended_domains()：那会触发 approval 模块链回导本模块
 # （延迟导入破环在"本模块经 feishu_tool/mail_tool 导入"的窗口内不成立）；

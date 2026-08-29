@@ -6,6 +6,7 @@ from urllib.error import URLError
 
 from .base import auditronclaw_tool
 from .domain_gate import check_domain_allowed
+from .egress import EgressChannel, register_egress_channel
 from ..logger import audit_logger
 
 # ============ 飞书推送命名工具 ============
@@ -23,7 +24,7 @@ assert FEISHU_WEBHOOK_DOMAIN in {
 }, "飞书工具绑定的目标域必须先入默认名单"
 _WEBHOOK_TIMEOUT_SECONDS = 10
 
-# 传输层注入缝（接缝 B）：模块内可替换的 sender，测试与基准注入假实现，零真实网络。
+# 传输层注入点：模块内可替换的 sender，测试与基准注入假实现，零真实网络。
 # 默认 None = 生产通道（_http_sender）。不作为工具参数——LLM 的参数面里没有它。
 _active_sender: Optional[Callable] = None
 
@@ -58,6 +59,27 @@ def _http_sender(webhook_url: str, payload: dict) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
+# 出站通道登记（03 票）：与传输定义同文件。哨兵深度=注入点 _http_sender——
+# 它本身就是网络边界（urlopen 在其体内），测试一律经注入假 sender 零网络。
+def _get_http_sender():
+    return _http_sender
+
+
+def _set_http_sender(transport) -> None:
+    global _http_sender
+    _http_sender = transport
+
+
+register_egress_channel(EgressChannel(
+    name="feishu_webhook",
+    module=__name__,
+    getter=_get_http_sender,
+    setter=_set_http_sender,
+    guard="守注入点 _http_sender（它本身就是网络边界）；测试请用 "
+          "helpers.InjectedSender 注入假 sender，零真实网络",
+))
+
+
 @auditronclaw_tool
 def send_feishu_summary(summary_text: str) -> str:
     """
@@ -81,7 +103,7 @@ def send_feishu_summary(summary_text: str) -> str:
 def push_text_via_bound_domain(summary_text: str, tool_name: str):
     """
     命名推送的核心路径：凭据检查 → 域名门 → 活动 sender → 审计回执。
-    供 send_feishu_summary 与事务台提交工具共用——同一注入缝（_active_sender）、
+    供 send_feishu_summary 与事务台提交工具共用——同一注入点（_active_sender）、
     同一道域名门、同一套审计词汇。返回 (是否成功, 给 LLM 看的脱敏回执文案)。
     """
     try:

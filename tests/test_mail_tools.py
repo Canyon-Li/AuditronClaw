@@ -9,8 +9,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from helpers import InjectedProvider
 
+from auditronclaw.core.approval.gate import wrap_tool
+from auditronclaw.core.approval.hooks import AuditReceiptHook
 from auditronclaw.core.tools import domain_gate, mail_tool
-from auditronclaw.core.tools.domain_gate import DEFAULT_ALLOWED_DOMAINS
+from auditronclaw.core.tools.domain_gate import (
+    DEFAULT_ALLOWED_DOMAINS,
+    DomainDenied,
+)
 from auditronclaw.core.tools.mail_tool import read_recent_emails
 
 
@@ -173,49 +178,65 @@ class TestReadRecentEmailsSecurity(unittest.TestCase):
         }
 
     def test_credentials_never_in_result_or_audit(self):
-        """凭据钉子：授权码/账号只从 .env 读，不进参数、返回值与审计日志"""
+        """凭据钉子：授权码/账号只从 .env 读，不进参数、返回值与审计回执
+        （03 票起回执内容随 Receipt 返回值走——直接扫回执载荷本身）"""
+        from auditronclaw.core.approval.hooks import Receipt
         provider = FakeMailProvider(build_fixture_emails(count=2))
-        with InjectedProvider(provider), patch.dict(os.environ, self._env_with_creds()), \
-                patch("auditronclaw.core.tools.mail_tool.audit_logger") as mock_logger:
+        with InjectedProvider(provider), patch.dict(os.environ, self._env_with_creds()):
             ok_result = read_recent_emails.invoke({"hours": 24, "max_emails": 10})
             mail_tool.set_provider(FakeMailProvider([], error=OSError(
                 "login failed for me@qq.com with password SECRET_AUTH_CODE")))
             fail_result = read_recent_emails.invoke({"hours": 24, "max_emails": 10})
 
-        all_logged = "".join(str(c.args) + str(c.kwargs) for c in mock_logger.log_event.call_args_list)
         self.assertNotIn("SECRET_AUTH_CODE", ok_result)
         self.assertNotIn("SECRET_AUTH_CODE", fail_result)
-        self.assertNotIn("SECRET_AUTH_CODE", all_logged)
+        for value in (ok_result, fail_result):
+            if isinstance(value, Receipt):
+                self.assertNotIn("SECRET_AUTH_CODE", value.audit_content,
+                                 "回执内容（将落审计事件）不得含凭据")
 
     def test_audit_file_clean_after_tool_run(self):
-        """凭据纪律的落盘级验证：真实审计 jsonl 全文不含授权码（与 01 同级钉子）"""
+        """凭据纪律的落盘级验证：真实审计 jsonl 全文不含授权码（与 01 同级钉子）。
+        03 票起回执由 wrapper 的 AuditReceiptHook 落盘——必须经门调用，
+        回执才真实走一遍"工具 → hook → jsonl"全链，裸调用不写回执"""
         from auditronclaw.core.logger import audit_logger
 
         secret = f"AUTHCODE_{os.getpid()}XYZ"
         env = self._env_with_creds() | {"MAIL_IMAP_PASSWORD": secret}
         provider = FakeMailProvider(build_fixture_emails(count=2))
+        gated = wrap_tool(read_recent_emails, thread_id="gate_test",
+                          hooks=(AuditReceiptHook(),))
         with InjectedProvider(provider), patch.dict(os.environ, env):
-            read_recent_emails.invoke({"hours": 24, "max_emails": 10})
+            gated.invoke({"hours": 24, "max_emails": 10})
             mail_tool.set_provider(FakeMailProvider([], error=OSError(f"login failed with {secret}")))
-            read_recent_emails.invoke({"hours": 24, "max_emails": 10})
+            gated.invoke({"hours": 24, "max_emails": 10})
 
         audit_logger.log_queue.join()
         system_log = os.path.join(audit_logger.log_dir, "system.jsonl")
         self.assertTrue(os.path.exists(system_log), "system 级审计日志应存在")
         with open(system_log, encoding="utf-8") as f:
-            self.assertNotIn(secret, f.read())
+            full_text = f.read()
+        # 两轮回执都真实落盘了（成功 + 错误兜底），钉子不是空转
+        self.assertIn("邮箱读取回执", full_text)
+        self.assertIn("邮箱读取失败", full_text)
+        self.assertNotIn(secret, full_text)
 
     def test_domain_guard_blocks_when_domain_denied(self):
-        """守卫先行：IMAP 域不在名单时拒绝读取并落审计（与 01 同一守卫）"""
+        """守卫先行：IMAP 域不在名单时拒绝读取并落审计（03 票起工具体抛
+        DomainDenied，由审批门 wrapper 统一格式落拒绝回执。经门调用以
+        规则放行形态抵达工具体——守卫是门放行后的结构性兜底）"""
         provider = FakeMailProvider(build_fixture_emails(count=2))
+        gated = wrap_tool(read_recent_emails, thread_id="gate_test",
+                          rule_matcher=lambda *a, **k: {"id": "r1"})
         # 三个名单来源全空:默认/环境变量/运行时审批规则(审批门 05 票起规则也是名单源)
         with InjectedProvider(provider), patch.dict(os.environ, self._env_with_creds()), \
-                patch("auditronclaw.core.tools.mail_tool.audit_logger") as mock_logger, \
+                patch("auditronclaw.core.approval.gate.audit_logger") as mock_logger, \
                 patch.object(domain_gate, "DEFAULT_ALLOWED_DOMAINS", set()), \
                 patch.object(domain_gate, "_EXTENDED_DOMAINS", set()), \
                 patch.object(domain_gate, "load_approval_rule_domains", return_value=[]):
-            result = read_recent_emails.invoke({"hours": 24, "max_emails": 10})
+            result = gated.invoke({"hours": 24, "max_emails": 10})
         self.assertIn("拒绝", result)
+        self.assertIn("白名单拦截", result)
         self.assertEqual(provider.calls, [], "守卫拦截后不得触达传输层")
         denied_logged = any(
             "白名单" in c.kwargs.get("content", "")
@@ -226,15 +247,71 @@ class TestReadRecentEmailsSecurity(unittest.TestCase):
     def test_guard_denied_never_leaks_credentials(self):
         """守卫拒绝路径的返回值与审计也不含凭据"""
         provider = FakeMailProvider([])
+        gated = wrap_tool(read_recent_emails, thread_id="gate_test",
+                          rule_matcher=lambda *a, **k: {"id": "r1"})
         with InjectedProvider(provider), patch.dict(os.environ, self._env_with_creds()), \
-                patch("auditronclaw.core.tools.mail_tool.audit_logger") as mock_logger, \
+                patch("auditronclaw.core.approval.gate.audit_logger") as mock_logger, \
                 patch.object(domain_gate, "DEFAULT_ALLOWED_DOMAINS", set()), \
                 patch.object(domain_gate, "_EXTENDED_DOMAINS", set()), \
                 patch.object(domain_gate, "load_approval_rule_domains", return_value=[]):
-            result = read_recent_emails.invoke({"hours": 24, "max_emails": 10})
+            result = gated.invoke({"hours": 24, "max_emails": 10})
         all_logged = "".join(str(c.args) + str(c.kwargs) for c in mock_logger.log_event.call_args_list)
         self.assertNotIn("SECRET_AUTH_CODE", result)
         self.assertNotIn("SECRET_AUTH_CODE", all_logged)
+
+    def test_raw_denial_raises_typed_exception(self):
+        """裸调用（无 wrapper）在名单外直接抛 DomainDenied：拒绝回执的落盘
+        与话术属 wrapper（回执单源），裸工具不再自带拒绝 UX——03 票结构性
+        变化，裸调方必须过门"""
+        provider = FakeMailProvider([])
+        with InjectedProvider(provider), patch.dict(os.environ, self._env_with_creds()), \
+                patch.object(domain_gate, "DEFAULT_ALLOWED_DOMAINS", set()), \
+                patch.object(domain_gate, "_EXTENDED_DOMAINS", set()), \
+                patch.object(domain_gate, "load_approval_rule_domains", return_value=[]):
+            with self.assertRaises(DomainDenied):
+                read_recent_emails.invoke({"hours": 24, "max_emails": 10})
+        self.assertEqual(provider.calls, [], "守卫拦截后不得触达传输层")
+
+    def test_success_receipt_single_source_via_hook(self):
+        """成功回执单源（03 票验收）：回执内容随返回值走，由 wrapper 的
+        AuditReceiptHook 统一落 system 级审计事件，内容与三件套时代逐字一致"""
+        mails = build_fixture_emails(count=2, oldest_hours=12)
+        gated = wrap_tool(read_recent_emails, thread_id="gate_test",
+                          hooks=(AuditReceiptHook(),))
+        with InjectedProvider(FakeMailProvider(mails)), \
+                patch.dict(os.environ, self._env_with_creds()), \
+                patch("auditronclaw.core.approval.hooks.audit_logger") as mock_logger:
+            result = gated.invoke({"hours": 24, "max_emails": 10})
+        self.assertIn("共 2 封", result)
+        self.assertIs(type(result), str, "回执取出后返回值为普通 str")
+        (event,) = mock_logger.log_event.call_args_list
+        self.assertEqual(event.kwargs, {
+            "thread_id": "system",
+            "event": "system_action",
+            "content": (
+                f"邮箱读取回执：目标域 {mail_tool.IMAP_DOMAIN}，窗口 24 小时，"
+                f"取回 2 封，展示 2 封。"
+            ),
+        })
+
+    def test_error_receipt_single_source_via_hook(self):
+        """错误兜底回执同走单源：传输层异常的结构化错误经 Receipt 落审计"""
+        gated = wrap_tool(read_recent_emails, thread_id="gate_test",
+                          hooks=(AuditReceiptHook(),))
+        with InjectedProvider(FakeMailProvider([], error=ConnectionError("refused"))), \
+                patch.dict(os.environ, self._env_with_creds()), \
+                patch("auditronclaw.core.approval.hooks.audit_logger") as mock_logger:
+            result = gated.invoke({"hours": 24, "max_emails": 10})
+        self.assertIn("失败", result)
+        self.assertIn("ConnectionError", result)
+        (event,) = mock_logger.log_event.call_args_list
+        self.assertEqual(event.kwargs, {
+            "thread_id": "system",
+            "event": "system_action",
+            "content": (
+                f"邮箱读取失败：目标域 {mail_tool.IMAP_DOMAIN}，错误 ConnectionError。"
+            ),
+        })
 
     def test_missing_credentials_structured_error_no_network(self):
         """凭据未配置：结构化错误，不碰网络"""

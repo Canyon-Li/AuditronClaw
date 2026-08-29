@@ -17,7 +17,8 @@
 """
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, FrozenSet, List, Optional
+from time import monotonic
+from typing import Callable, FrozenSet, List, Optional, Sequence
 
 from langchain_core.runnables import ensure_config
 from langchain_core.tools import BaseTool, StructuredTool
@@ -25,11 +26,17 @@ from langgraph.types import interrupt
 
 from ..logger import audit_logger
 from ..skill_loader import SKILL_FOLDER_META_KEY
+from ..tools.domain_gate import (
+    DomainDenied,
+    domain_denied_audit_content,
+    domain_denied_reply,
+)
 from .classifier import (
     Provenance,
     RiskAssessment,
     classify_tool_call,
 )
+from .hooks import ToolCallContext, ToolHook
 
 # ============ 审计事件(审批留痕是本章凭证主体,不塞 system_action) ============
 
@@ -180,9 +187,18 @@ def _attended(config: dict) -> bool:
 
     缺省(不声明来源)= 无人值守。config 由工具执行期的 ensure_config() 取得
     ——引擎把它放进 astream 的 configurable,工具链上下文原样携带。
+    判定走 _turn_origin 同一解析(fail-closed 口径单源)。
     """
+    return _turn_origin(config) == TurnOrigin.HUMAN
+
+
+def _turn_origin(config: dict) -> TurnOrigin:
+    """回合来源(类型化):非枚举值按未声明(fail-closed,与 _attended 同口径)。"""
     origin = (config.get("configurable") or {}).get("turn_origin", "")
-    return origin == TurnOrigin.HUMAN.value
+    try:
+        return TurnOrigin(origin)
+    except ValueError:
+        return TurnOrigin.UNATTENDED
 
 
 def _mint_persist_rules(rule_store, thread_id: str, assessment: RiskAssessment) -> None:
@@ -234,18 +250,23 @@ def wrap_tool(
     skill_folder: str = "",
     rule_matcher: Optional[RuleMatcher] = None,
     rule_store=None,
+    hooks: Sequence[ToolHook] = (),
 ) -> StructuredTool:
-    """给单个工具包上门:同名同 schema,调用先过 分级→规则→问人 链。"""
+    """给单个工具包上门:同名同 schema,调用先过 分级→规则→问人 链。
 
-    def _decide(kwargs: dict):
+    hooks(03 票)是观察点:before 见每次经门调用的尝试,after/on_error 只
+    见工具体执行段——hooks 只观察与记录,无否决权。无 hooks 时行为不变。
+    工具体抛 DomainDenied 时,由本 wrapper 统一格式落拒绝回执并返回拒绝
+    话术(回执单源,格式在 tools/domain_gate.py)。
+    """
+
+    def _decide(kwargs: dict, assessment: RiskAssessment, config: dict):
         """固定链主体。返回 (放行, 拒绝话术|None)。
 
         问人 = LangGraph interrupt:payload 是 ApprovalRequest 的字段形状,
         引擎侧重组为回合事件发出;应答 ApprovalDecision 经 Command resume
         回到本调用(同一次 invoke,批准与执行天然绑定同一份规范化参数)。
         """
-        assessment = classify_tool_call(
-            tool.name, kwargs, provenance=provenance, skill_folder=skill_folder)
         if not assessment.requires_approval:
             return True, None
 
@@ -258,7 +279,7 @@ def wrap_tool(
                                    rule_id=_rule_id(rule))
             return True, None
 
-        if _attended(ensure_config()):
+        if _attended(config):
             decision = ensure_decision(interrupt({
                 "tool": tool.name, "args": dict(kwargs),
                 "risk_class": assessment.risk_class, "reason": assessment.reason,
@@ -280,17 +301,63 @@ def wrap_tool(
                                approved=False, source=DecisionSource.UNATTENDED)
         return False, rejection_text(tool.name, assessment)
 
+    def _new_call(kwargs: dict, config: dict) -> ToolCallContext:
+        """分级 + 组装观察上下文(hooks 的只读面)。"""
+        assessment = classify_tool_call(
+            tool.name, kwargs, provenance=provenance, skill_folder=skill_folder)
+        return ToolCallContext(
+            tool=tool.name, args=kwargs, origin=_turn_origin(config),
+            risk=assessment, started=monotonic())
+
+    def _denied_outcome(denied: DomainDenied) -> str:
+        """域名拒绝的统一回执:wrapper 单点落盘(03 票),话术原样返回。"""
+        audit_logger.log_event(
+            thread_id="system", event="system_action",
+            content=domain_denied_audit_content(denied))
+        return domain_denied_reply(denied)
+
+    def _observe_error(ctx: ToolCallContext, exc: Exception) -> None:
+        for h in hooks:
+            h.on_error(ctx, exc)  # 默认实现再抛:hooks 只观察,无吞错权
+
+    def _run_after_hooks(ctx: ToolCallContext, result):
+        for h in hooks:
+            result = h.after(ctx, result)
+        return result
+
     def gated_run(**kwargs):
-        allowed, rejection = _decide(kwargs)
+        config = ensure_config()
+        ctx = _new_call(kwargs, config)
+        for h in hooks:
+            h.before(ctx)
+        allowed, rejection = _decide(kwargs, ctx.risk, config)
         if not allowed:
             return rejection
-        return tool.invoke(_inner_args(tool, kwargs))
+        try:
+            result = tool.invoke(_inner_args(tool, kwargs))
+        except DomainDenied as denied:
+            return _denied_outcome(denied)
+        except Exception as exc:
+            _observe_error(ctx, exc)
+            raise
+        return _run_after_hooks(ctx, result)
 
     async def gated_arun(**kwargs):
-        allowed, rejection = _decide(kwargs)
+        config = ensure_config()
+        ctx = _new_call(kwargs, config)
+        for h in hooks:
+            h.before(ctx)
+        allowed, rejection = _decide(kwargs, ctx.risk, config)
         if not allowed:
             return rejection
-        return await tool.ainvoke(_inner_args(tool, kwargs))
+        try:
+            result = await tool.ainvoke(_inner_args(tool, kwargs))
+        except DomainDenied as denied:
+            return _denied_outcome(denied)
+        except Exception as exc:
+            _observe_error(ctx, exc)
+            raise
+        return _run_after_hooks(ctx, result)
 
     return StructuredTool.from_function(
         func=gated_run,
@@ -309,6 +376,7 @@ def wrap_all_tools(
     extra_names: FrozenSet[str] = frozenset(),
     rule_matcher: Optional[RuleMatcher] = None,
     rule_store=None,
+    hooks: Sequence[ToolHook] = (),
 ) -> List[BaseTool]:
     """装配点统一包装:内置/技能/外接全部过门。
 
@@ -316,6 +384,7 @@ def wrap_all_tools(
     skill(按命令收敛);其余 → builtin(查副作用册)。
     不做"已包装"短路:包装标记写在工具元数据里,而元数据来自被守对象
     (外接工具可自带任意元数据),守门判定不能握在被守者手里。
+    hooks 原样传给每个包装件(同一观察点盖全部注册工具)。
     """
     wrapped = []
     for t in tools:
@@ -329,5 +398,5 @@ def wrap_all_tools(
         wrapped.append(wrap_tool(
             t, thread_id=thread_id, provenance=provenance,
             skill_folder=folder, rule_matcher=rule_matcher,
-            rule_store=rule_store))
+            rule_store=rule_store, hooks=hooks))
     return wrapped
