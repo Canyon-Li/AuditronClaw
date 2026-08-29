@@ -7,6 +7,7 @@ from .context import AgentState, trim_context_messages
 from .provider import get_provider
 from .tools.builtins import BUILTIN_TOOLS, create_profile_tool
 from .approval.gate import wrap_all_tools
+from .approval.hooks import AuditReceiptHook
 from .approval.rules import RuleStore, make_rule_matcher
 from .logger import audit_logger
 from .config import MEMORY_DIR
@@ -106,10 +107,13 @@ def create_agent_app(
     # 人来源回合规则未命中时 interrupt 问人(03 票),答"永久允许"即经
     # rule_store 铸规则;心跳/基准/未声明来源构造上不问人,直接拒。
     rule_store = RuleStore()
+    # hooks 装配在包装单点(03 票):全部注册工具共用同一观察缝,
+    # AuditReceiptHook 是回执单源(成功/错误回执由工具登记、hook 统一落盘)
     gated_tools = wrap_all_tools(actual_tools, thread_id=thread_id,
                                  extra_names=extra_names,
                                  rule_matcher=make_rule_matcher(rule_store),
-                                 rule_store=rule_store)
+                                 rule_store=rule_store,
+                                 hooks=(AuditReceiptHook(),))
 
     tool_node = ToolNode(gated_tools)
 

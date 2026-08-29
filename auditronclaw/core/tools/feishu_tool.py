@@ -6,6 +6,7 @@ from urllib.error import URLError
 
 from .base import auditronclaw_tool
 from .domain_gate import check_domain_allowed
+from .egress import EgressChannel, register_egress_channel
 from ..logger import audit_logger
 
 # ============ 飞书推送命名工具 ============
@@ -56,6 +57,27 @@ def _http_sender(webhook_url: str, payload: dict) -> dict:
     )
     with urllib_request.urlopen(req, timeout=_WEBHOOK_TIMEOUT_SECONDS) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+# 出站通道登记（03 票）：与传输定义同文件。哨兵深度=注入缝 _http_sender——
+# 它本身就是网络边界（urlopen 在其体内），测试一律经注入假 sender 零网络。
+def _get_http_sender():
+    return _http_sender
+
+
+def _set_http_sender(transport) -> None:
+    global _http_sender
+    _http_sender = transport
+
+
+register_egress_channel(EgressChannel(
+    name="feishu_webhook",
+    module=__name__,
+    getter=_get_http_sender,
+    setter=_set_http_sender,
+    guard="守注入缝 _http_sender（它本身就是网络边界）；测试请用 "
+          "helpers.InjectedSender 注入假 sender，零真实网络",
+))
 
 
 @auditronclaw_tool
