@@ -140,6 +140,9 @@ class TestScheduledTasks(unittest.TestCase):
     def setUp(self):
         # 创建临时任务文件
         self.temp_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.json')
+        # Windows:被句柄占用的文件无法被 os.replace 原子替换(WinError 5),
+        # 写路径测试不得持有 tasks.json 句柄
+        self.temp_file.close()
         self.original_tasks_file = TASKS_FILE
         # 更新 TASKS_FILE 指向临时文件
         import auditronclaw.core.tools.builtins
@@ -238,6 +241,8 @@ class TestScheduledTasksWithTasks(unittest.TestCase):
 
     def setUp(self):
         self.temp_tasks_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.json')
+        # 同 TestScheduledTasks:立即关句柄,别占着写目标挡 os.replace
+        self.temp_tasks_file.close()
 
         # 设置临时任务文件路径
         self.original_tasks_file = TASKS_FILE
