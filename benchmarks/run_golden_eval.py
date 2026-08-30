@@ -80,7 +80,7 @@ def judge(result: dict, case: dict) -> dict:
             if not ok:
                 misses.append(f"file_content:{assertion['path']}")
         elif kind == "push_contains":
-            # 推送捕获锚:任一次推送含期望串即命中(捕获列表由 pipeline 注入缝产出)
+            # 推送捕获锚:任一次推送含期望串即命中(捕获列表由 pipeline 注入点产出)
             if not any(assertion["contains"] in p for p in result.get("pushes", [])):
                 misses.append(f"push_contains:{assertion['contains']}")
         else:
@@ -134,7 +134,7 @@ async def main_async(args) -> None:
             verdict = judge(raw, case)
             verdict["latency_s"] = round(time.time() - t0, 1)
             verdict["error"] = None
-        except Exception as e:  # 单用例失败不炸整场
+        except Exception as e:  # 单用例失败不中断整场
             verdict = {
                 "case_id": case["id"], "surface": case["surface"],
                 "tool_calls": [], "reply_excerpt": f"RUNNER ERROR: {e}",

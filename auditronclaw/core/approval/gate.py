@@ -230,7 +230,7 @@ def _inner_args(tool: BaseTool, kwargs: dict) -> dict:
     "可选字段默认值"展开成显式 None 传进门,内层 tool.invoke 再校验时对
     str 字段的显式 None 直接抛 ValidationError——默认值只容许缺席,不容
     显式 null。无门时 ToolNode 单层校验、函数默认参收 None 相安无事
-    (回归样本:modify_scheduled_task 只传 task_id+new_time 被炸)。
+    (回归样本:modify_scheduled_task 只传 task_id+new_time 时报错)。
     只剥"可选字段 + None":必填字段的 None 保留,内层照常给出必填缺值的
     诚实报错;显式传 null 的可选字段与缺省同义,与无门路径等价。
     """

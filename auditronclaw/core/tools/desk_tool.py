@@ -158,7 +158,7 @@ def submit_mailbox_desk_report(
                 ),
             )
 
-        # 2. 推送（共用飞书核心路径：同一注入缝、同一道域名门、同一套审计）
+        # 2. 推送（共用飞书核心路径：同一注入点、同一道域名门、同一套审计）
         from . import feishu_tool
         text = render_desk_report_text(report)
         pushed, push_message = feishu_tool.push_text_via_bound_domain(

@@ -106,7 +106,7 @@ class TestWriteFailureFallback(SingletonResetTestCase):
             self.assertTrue(hit.get("fallback_reason"), "兜底行须附失败缘由")
 
     def test_fallback_failure_prints_and_thread_survives(self):
-        """兜底也失败:打印错误收场,写线程不炸"""
+        """兜底也失败:打印错误收场,写线程不崩溃"""
         with tempfile.TemporaryDirectory() as tmp:
             logger = JSONLEventLogger(log_dir=os.path.join(tmp, "logs"))
             os.makedirs(os.path.join(logger.log_dir, "system.jsonl"))

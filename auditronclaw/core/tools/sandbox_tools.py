@@ -57,7 +57,7 @@ def _resolve_office_path(relative_path: str) -> tuple:
     # 核心防御：目标路径必须严格落在 OFFICE_DIR 内——前缀之后必须跟路径
     # 分隔符（normcase 消掉 Windows 大小写与斜杠差异）。裸 startswith 会
     # 放过同前缀兄弟名：../office_x 解析后以 office 开头却根本不在工位内，
-    # 这是 agent 写面逃出 office、够着 office 外文件（如审批规则）的一条缝
+    # 这是 agent 写面逃出 office、够着 office 外文件（如审批规则）的一个缺口
     norm_target, norm_base = os.path.normcase(target_path), os.path.normcase(base_dir)
     if norm_target != norm_base and not norm_target.startswith(norm_base + os.sep):
         raise PermissionError(f"越权拦截：你试图访问沙盒外的路径 '{relative_path}'！你只能在 office 工位内活动。")

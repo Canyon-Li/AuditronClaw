@@ -5,7 +5,7 @@
 reply)② 回合事件流形状钉死(类型序、final 标记、TurnEnd 搭载轨迹、
 异常上抛时不发 TurnEnd)。
 
-TDD 流程:本文件先在 session.py 未实现时运行(import 即红),实现后全绿。
+TDD 流程:本文件先在 session.py 未实现时运行(import 即红),实现后全部通过。
 01 票时基准照旧手写解析,等价性由本文件证明;02 票起 _drive_agent 改走
 引擎驱动,本文件继续钉死事件语义与字面期望值(适配器全量契约另由
 tests/test_bench_adapter_characterization.py 把守)。
@@ -95,9 +95,9 @@ SCRIPT = [
 
 
 def _enter_fake_tool_patches(stack, llm):
-    """现有缝三件套 + 审批门入册:假 LLM + 假工具表 + 空技能表 + 假工具入副作用册。
+    """现有注入点三件套 + 审批门入册:假 LLM + 假工具表 + 空技能表 + 假工具入副作用册。
 
-    两侧(引擎/基准)都走 BUILTIN_TOOLS 缝而非 tools= 直给——_drive_agent
+    两侧(引擎/基准)都走 BUILTIN_TOOLS 注入点而非 tools= 直给——_drive_agent
     内部自建 app 只吃这条路径,两侧必须同构工具表,等价性才成立。
     假探针工具按"新工具入册即加映射"纪律注册为纯读——本文件测的是解析
     等价性,不是审批门(门的行为由 tests/test_approval_gate.py 把守)。
@@ -114,7 +114,7 @@ def _enter_fake_tool_patches(stack, llm):
 
 
 def _build_app(llm, stack):
-    """走现有缝构造 agent app:假 LLM + 假工具表 + 空技能表 + 假工具入册。
+    """走现有注入点构造 agent app:假 LLM + 假工具表 + 空技能表 + 假工具入册。
 
     patch 由调用方的 stack 持有,须罩住整个运行期——审批门分级发生在工具
     调用时(而非 app 构造时),构造完就撤 patch 会让假工具在门处被判未入册。

@@ -7,7 +7,7 @@ IMAP 守真套接字边界 imaplib.IMAP4_SSL（不得降级为只换注入点，
 
 meta-test 是强制力：import 网络库的模块必须在注册表有条目，否则红——
 "未登记无声进库"变"未登记必红"；并以故意未登记样例验证 meta-test 本身
-会红（测试的测试，防 meta-test 空转）。
+会红（测试的测试，防 meta-test 形同虚设）。
 """
 import ast
 import os
@@ -154,8 +154,8 @@ class TestEgressRegistryMetaTest(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_meta_test_goes_red_on_unregistered_sample(self):
-        """故意未登记样例：判定核必须红（测试的测试——防 meta-test 空转，
-        假如判定核退化成永绿，上面那条全包扫描就失去了强制力）"""
+        """故意未登记样例：判定核必须红（测试的测试——防 meta-test 形同虚设，
+        假如判定核退化成永远通过，上面那条全包扫描就失去了强制力）"""
         registered = frozenset(ch.module for ch in egress.egress_channels())
         with self.assertRaises(AssertionError):
             assert_module_registered("auditronclaw.core.tools.smoke_http",
@@ -163,7 +163,8 @@ class TestEgressRegistryMetaTest(unittest.TestCase):
 
     def test_walker_catches_unregistered_module_in_package(self):
         """遍历器也必须会红：把故意未登记的样例真放进包里扫一次，能被
-        找出来——防遍历器因路径/布局变化空转，让全包扫描变成永绿的假关"""
+        找出来——防遍历器因路径/布局变化扫不到模块却照常通过，让全包扫描
+        变成永远显示通过的假关卡"""
         offender = os.path.join(PACKAGE_ROOT, "core", "tools",
                                 "_unregistered_smoke_http.py")
         self.assertFalse(os.path.exists(offender), "样例文件用后必须清理")

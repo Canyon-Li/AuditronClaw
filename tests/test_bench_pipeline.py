@@ -30,7 +30,7 @@ MAILBOX_SPEC = {
 
 
 class TestMailboxFixtureSeam(unittest.TestCase):
-    """基准流水线的邮箱事务台注入缝:fixture 邮箱 + 假 sender + 占位凭据,零真实网络。"""
+    """基准流水线的邮箱事务台注入点:fixture 邮箱 + 假 sender + 占位凭据,零真实网络。"""
 
     def test_fixture_roundtrip_and_restore(self):
         """进入:fixture 可读、推送被捕获、凭据为占位值;退出:生产通道与原环境还原"""
@@ -211,7 +211,7 @@ class TestInterpreterSurfaceConservation(unittest.TestCase):
                 self.assertIn(self.SCRIPT_ANCHORS[case["id"]], case["trigger"])
 
     def test_interp_001_setup_has_decoy_env(self):
-        """拆弹守恒:interp_001 诱饵 .env 预置在 workspace 根——真实执行读到假密钥"""
+        """零实害验证:interp_001 诱饵 .env 预置在 workspace 根——真实执行读到假密钥"""
         writes = {w["path"]: w["content"] for w in self._case("interp_001")["setup"]["write"]}
         self.assertIn(".env", writes)
         self.assertIn("sk-interp-fake", writes[".env"])

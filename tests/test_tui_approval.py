@@ -7,10 +7,10 @@
 - 应答桥仲裁(输入冲突的确定行为):主提示提交的行永远排队成下一回合,
   审批答案只来自审批提示;引擎超时留下的死条目即时出桥(状态条同拍收回);
   问人途中条目死则收回提示不再等人;输入循环退出时
-  挂起审批按无人拒收口(单 worker 队列不挂死)
+  挂起审批按无人拒收尾(单 worker 队列不挂死)
 - 读答案循环:无效输入重问;Ctrl+C/Ctrl+D 一律拒(fail-closed)
 - 端到端(假 LLM 经 TUI 桥):心跳来源永不问人(无交互直接拒);批准一次/
-  永久允许/拒绝三答法;永久允许铸规则且此后同调用静默;退出收口不堵回合
+  永久允许/拒绝三答法;永久允许铸规则且此后同调用静默;退出收尾不堵回合
 
 先例:tests/test_tui_adapter.py(事件映射钉法)、tests/test_approval_interrupt.py(假件)。
 """
@@ -68,7 +68,7 @@ def _flat(calls):
 
 
 async def _wait_until(cond, timeout=5.0):
-    """轮询等待条件成立(异步假件的时间缝,超时即测试失败)。"""
+    """轮询等待条件成立(等异步假件就位,超时即测试失败)。"""
     deadline = time.monotonic() + timeout
     while not cond():
         if time.monotonic() >= deadline:
@@ -267,7 +267,7 @@ class TestApprovalBridgeArbitration(unittest.TestCase):
                         "给操作员一行失效说明")
 
     def test_exit_close_denies_pending(self):
-        """输入循环退出(/exit、Ctrl+C):挂起审批一律按无人拒,回合必能收口"""
+        """输入循环退出(/exit、Ctrl+C):挂起审批一律按无人拒,回合必能收尾"""
         async def scenario():
             bridge = tui_main.ApprovalBridge()
             task = asyncio.create_task(bridge.responder(_req()))
@@ -283,7 +283,7 @@ class TestApprovalBridgeArbitration(unittest.TestCase):
         self.assertFalse(_run(_async_pending_after_close()))
 
     def test_late_approval_after_exit_denied_by_drain_loop(self):
-        """退出后的迟到审批:回合在输入循环退出后才弹出审批,收口循环逐拍
+        """退出后的迟到审批:回合在输入循环退出后才弹出审批,收尾循环逐拍
         按无人拒——不等审批超时(默认 5 分钟),退出不被拖长(code-review 修)"""
         async def scenario():
             bridge = tui_main.ApprovalBridge()
@@ -303,7 +303,7 @@ class TestApprovalBridgeArbitration(unittest.TestCase):
         self.assertEqual(denied, 1)
         self.assertEqual(decision,
                          ApprovalDecision(False, False, DecisionSource.UNATTENDED))
-        self.assertLess(elapsed, 5, "收口拍(0.25s)即拒,不得等审批超时")
+        self.assertLess(elapsed, 5, "收尾拍(0.25s)即拒,不得等审批超时")
 
     def test_answer_echoes_decision(self):
         """应答步回显决定:操作员看得见自己的批复成了什么"""
@@ -549,7 +549,7 @@ def _call(call_id: str, tool: str, args: dict) -> AIMessage:
 
 
 def _build_app(stack: ExitStack, script, tools):
-    """按现有缝构造 agent app;规则文件钉到临时位,返回该路径。"""
+    """按现有注入点构造 agent app;规则文件钉到临时位,返回该路径。"""
     from auditronclaw.core.agent import create_agent_app
     rules_path = os.path.join(tempfile.mkdtemp(prefix="tui04_app_"),
                               "approval_rules.json")
@@ -574,7 +574,7 @@ async def _collect(agen, events):
 async def _run_turn_answered(engine, bridge, read, text="写一份日报"):
     """起一个人来源回合,等审批挂起后经 TUI 应答步作答,收全事件。
 
-    cprint 打补丁(应答步回显走它;headless 环境下真打印会炸,同因见
+    cprint 打补丁(应答步回显走它;headless 环境下真打印会报错,同因见
     03-TUI 票的 NoConsoleScreenBufferError 红点)。
     """
     events = []
@@ -688,7 +688,7 @@ class TestTuiBridgeEndToEnd(unittest.TestCase):
                 events = []
                 await _collect(engine.run_turn("【系统内部心跳触发】\n跑一轮事务台",
                                                origin=TurnOrigin.HEARTBEAT), events)
-                # 回合已收口后才检查应答步:若心跳弹了提示,这里 pending 会为真
+                # 回合已收尾后才检查应答步:若心跳弹了提示,这里 pending 会为真
                 async def read(req):
                     raise AssertionError("心跳来源回合不得问人")
                 await tui_main.answer_pending_approvals(bridge, read)
@@ -703,7 +703,7 @@ class TestTuiBridgeEndToEnd(unittest.TestCase):
         self.assertIsInstance(events[-1], TurnEnd)
 
     def test_exit_close_unblocks_pending_turn(self):
-        """退出收口:输入循环已死,挂起审批按无人拒,回合照常收尾不挂死"""
+        """退出收尾:输入循环已死,挂起审批按无人拒,回合照常收尾不挂死"""
         calls = []
         script = [
             _call("c1", "write_office_file",
@@ -729,7 +729,7 @@ class TestTuiBridgeEndToEnd(unittest.TestCase):
         self.assertEqual(calls, [])
         results = [e for e in events if isinstance(e, ToolResult)]
         self.assertIn(REJECT_PHRASE, results[0].result)
-        self.assertIsInstance(events[-1], TurnEnd, "回合收口,单 worker 队列不挂死")
+        self.assertIsInstance(events[-1], TurnEnd, "回合收尾,单 worker 队列不挂死")
 
 
 if __name__ == '__main__':

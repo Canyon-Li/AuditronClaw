@@ -1,4 +1,4 @@
-"""审批门 03 票:打断缝(interrupt+resume)、回合来源、审批超时。
+"""审批门 03 票:打断机制(interrupt+resume)、回合来源、审批超时。
 
 分层(沿用仓库测试纪律):
 - 类型单测:ApprovalRequest 字段定稿 / ApprovalDecision 答案类型(source 与审计
@@ -162,7 +162,7 @@ def _write_call(call_id: str, tool: str, args: dict) -> AIMessage:
 
 
 def _build_app(stack: ExitStack, llm, tools) -> str:
-    """按现有缝构造 agent app;规则文件钉到临时路径,返回该路径。
+    """按现有注入点构造 agent app;规则文件钉到临时路径,返回该路径。
 
     patch 由调用方 stack 持有,须罩住整个运行期(分级/规则匹配在工具调用时
     才发生)。先例:tests/test_approval_gate.py TestUnattendedRejectionContinues。
@@ -384,7 +384,7 @@ class TestPersistMintsRule(unittest.TestCase):
 # ============ 超时:挂起的审批到期即终局拒,单 worker 队列不被堵死 ============
 
 class TestApprovalTimeout(unittest.TestCase):
-    """审批等待超时:短超时注入下,回合必须收口,拒绝+审计 source=timeout。"""
+    """审批等待超时:短超时注入下,回合必须收尾,拒绝+审计 source=timeout。"""
 
     def test_timeout_denies_and_turn_completes(self):
         calls = []
@@ -407,7 +407,7 @@ class TestApprovalTimeout(unittest.TestCase):
             events = _drive(engine, "写日报", origin=TurnOrigin.HUMAN)
             elapsed = time.monotonic() - start
 
-        self.assertLess(elapsed, 10, "短超时下回合必须快速收口,不挂死")
+        self.assertLess(elapsed, 10, "短超时下回合必须快速收尾,不挂死")
         self.assertEqual(calls, [], "超时=拒绝,原工具不得执行")
         results = [e for e in events if isinstance(e, ToolResult)]
         self.assertEqual(len(results), 1)
@@ -419,7 +419,7 @@ class TestApprovalTimeout(unittest.TestCase):
         self.assertEqual(decision["source"], DecisionSource.TIMEOUT.value)
 
     def test_misbehaving_responder_denies_fail_closed(self):
-        """应答器返回垃圾值或抛异常:一律按无人拒,回合收口不炸"""
+        """应答器返回垃圾值或抛异常:一律按无人拒,回合收尾不出错"""
         for responder in (lambda req: "yes",  # 非法载荷
                           lambda req: (_ for _ in ()).throw(RuntimeError("适配器故障"))):
             with self.subTest(responder=responder), ExitStack() as stack:
