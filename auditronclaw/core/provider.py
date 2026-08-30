@@ -1,6 +1,7 @@
 import os
 from typing import Any
 from langchain_core.language_models.chat_models import BaseChatModel
+from pydantic import SecretStr
 from dotenv import load_dotenv
 '''
 多模型适配(Factory)
@@ -33,7 +34,7 @@ def get_provider(
         
         current_api_key = api_key or os.environ.get("OPENAI_API_KEY")
         if not current_api_key:
-            raise ValueError(f"未找到 API Key！请确保 .env 中配置了 OPENAI_API_KEY")
+            raise ValueError("未找到 API Key！请确保 .env 中配置了 OPENAI_API_KEY")
             
 
         final_base_url = base_url or os.environ.get("OPENAI_API_BASE")
@@ -41,9 +42,9 @@ def get_provider(
             final_base_url = COMPATIBLE_BASE_URLS.get(provider_name) 
 
         return ChatOpenAI(
-            model=model_name, 
+            model=model_name,
             temperature=temperature,
-            api_key=current_api_key,
+            api_key=SecretStr(current_api_key),
             base_url=final_base_url,
             **kwargs
         )

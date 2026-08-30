@@ -107,11 +107,11 @@ def create_desk_submit_tool(tasks_file: str):
     def submit_mailbox_desk_report(
         window_hours: int,
         total_mails: int,
-        todos: list = None,
-        needs_reply: list = None,
-        notices: list = None,
+        todos: list | None = None,
+        needs_reply: list | None = None,
+        notices: list | None = None,
         ignorable_count: int = 0,
-        ignorable_top_senders: list = None,
+        ignorable_top_senders: list | None = None,
     ) -> str:
         """
         提交邮箱事务台日报：把 read_recent_emails 读到的邮件的分类结果作为结构化参数

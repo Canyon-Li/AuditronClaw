@@ -16,7 +16,6 @@
     raw = await run_case(case, model, provider)   # 返回 tool_calls/tool_results/reply
 """
 
-import asyncio
 import json
 import os
 import sys

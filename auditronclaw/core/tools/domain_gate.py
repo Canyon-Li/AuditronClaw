@@ -15,12 +15,14 @@ DEFAULT_ALLOWED_DOMAINS = {
     "open.feishu.cn",
 }
 
-# 扩展名单缓存：refresh_extended_domains() 时刷新。守卫读这份缓存做判定，
-# 自身不碰环境。
+# 扩展名单缓存：init_domain_gate（装配期）预热、refresh_extended_domains()
+# 时刷新。守卫读这份缓存做判定，自身不碰环境。
 _EXTENDED_DOMAINS: set = set()
 
 # 上次解析的环境变量 raw 值：raw 变化才重解析与重审计——判定路径经
-# refresh 生产路径反复进来（05 票），环境扩展审计必须每次变化只留一次
+# refresh 生产路径反复进来（05 票），环境扩展审计必须每次变化只留一次。
+# 模块级只留惰性默认（F2）：import 期读 env 会在 logger 未初始化时崩溃，
+# 环境变量若非空，扩展审计在装配预热或首次 refresh 时补落，语义不丢。
 _LAST_ENV_RAW: str | None = None
 
 # 运行时审批规则缓存：审批门"永久允许"铸出的域名扩展规则作用域（域名
@@ -36,9 +38,21 @@ _approval_rules_file: str | None = None
 
 
 def init_domain_gate(approval_rules_file: str) -> None:
-    """装配期注入：审批规则文件落点（create_agent_app 处与 RuleStore 同源）。"""
-    global _approval_rules_file
+    """装配期注入：审批规则文件落点（create_agent_app 处与 RuleStore 同源）。
+
+    环境变量扩展的预热也在此（F2）：曾经放 import 期，变量一进进程环境
+    （shell export 过），任何 import 本模块的入口都在 logger 初始化前
+    RuntimeError；装配期 logger 已锚定，预热安全。不经
+    refresh_extended_domains()：那会触发 approval 模块链回导本模块
+    （延迟导入破环在"本模块经 feishu_tool/mail_tool 导入"的窗口内不成立）；
+    审批规则部分即时读盘，无需装配期预热。
+    """
+    global _approval_rules_file, _LAST_ENV_RAW, _EXTENDED_DOMAINS
     _approval_rules_file = approval_rules_file
+    raw = os.getenv("AUDITRONCLAW_ALLOWED_DOMAINS", "")
+    if raw != _LAST_ENV_RAW:
+        _LAST_ENV_RAW = raw
+        _EXTENDED_DOMAINS = load_extended_domains()
 
 
 def load_extended_domains():
@@ -164,10 +178,3 @@ def domain_denied_reply(denied: DomainDenied) -> str:
         f"本次{denied.action}已被域名白名单拦截并记录审计。"
     )
 
-
-# 进程启动时加载一次环境变量扩展（与 shell 命令白名单的导入期加载同构）。
-# 不经 refresh_extended_domains()：那会触发 approval 模块链回导本模块
-# （延迟导入破环在"本模块经 feishu_tool/mail_tool 导入"的窗口内不成立）；
-# 审批规则部分即时读盘，无需导入期预热。
-_LAST_ENV_RAW = os.getenv("AUDITRONCLAW_ALLOWED_DOMAINS", "")
-_EXTENDED_DOMAINS = load_extended_domains()

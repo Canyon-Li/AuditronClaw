@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
-from .base import auditronclaw_tool, AuditronClawBaseTool
+from .base import auditronclaw_tool
 from .desk_tool import create_desk_submit_tool
 import ast
 import operator
@@ -207,10 +207,19 @@ def _write_tasks(tasks, tasks_file: str) -> None:
     锁约定:调用方须已持有 tasks_lock——本函数不自取(非重入锁,
     自取即把持锁调用方挂死)。
     """
-    with open(tasks_file + ".tmp", "w", encoding="utf-8") as f:
-        json.dump(tasks, f, ensure_ascii=False, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
+    try:
+        with open(tasks_file + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(tasks, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+    except BaseException:
+        # 写中途抛错不残留无主 tmp(瞬态文件,下次成功写本会覆盖,但半截
+        # tmp 躺在目录里没有意义)——删掉再抛,原异常不吞。
+        try:
+            os.unlink(tasks_file + ".tmp")
+        except OSError:
+            pass
+        raise
     os.replace(tasks_file + ".tmp", tasks_file)
 
 
@@ -278,7 +287,7 @@ def _validated_tasks(raw_tasks) -> list[ScheduledTask]:
     return valid
 
 
-def _append_task(tasks_file: str, target_time: str, description: str, repeat: str = None, repeat_count: int = None) -> None:
+def _append_task(tasks_file: str, target_time: str, description: str, repeat: str | None = None, repeat_count: int | None = None) -> None:
     """
     向任务队列文件追加一条任务（线程锁内读-改-写，落点为装配期入参）。
 
@@ -292,7 +301,9 @@ def _append_task(tasks_file: str, target_time: str, description: str, repeat: st
         id=str(uuid.uuid4())[:8],
         target_time=target_time,
         description=description,
-        repeat=repeat,
+        # 宽类型是有意的:非法取值在运行期由 ScheduledTask 的 Literal 校验
+        # 把关(抛 ValidationError,调用方转结构化话术),类型检查不抢跑
+        repeat=repeat,  # type: ignore[arg-type]
         repeat_count=repeat_count,
     )
     with tasks_lock:
@@ -321,7 +332,10 @@ def create_task_tools(tasks_file: str) -> list:
     各装配各的临时队列文件，互不串台。
     """
     @auditronclaw_tool
-    def schedule_task(target_time: str, description: str, repeat: str = None, repeat_count: int = None) -> str:
+    # 注解保持隐式 Optional:签名即 LLM 看到的工具 schema,显式 | None 会把
+    # "type":"string" 变 anyOf[string,null],schema 钉住现状,由 mypy ignore 埋点
+    def schedule_task(target_time: str, description: str, repeat: str = None,  # type: ignore[assignment]
+                      repeat_count: int = None) -> str:  # type: ignore[assignment]
         """
         为一个未来的任务设定闹钟或提醒。
         参数 target_time 必须是严格的格式："YYYY-MM-DD HH:MM:SS"（请先调用 get_current_time 获取当前时间，并在其基础上推算）。
@@ -447,7 +461,9 @@ def create_task_tools(tasks_file: str) -> list:
             return f" 任务 [ID: {task_id}] 已成功取消。"
 
     @auditronclaw_tool
-    def modify_scheduled_task(task_id: str, new_time: str = None, new_description: str = None) -> str:
+    # 同 schedule_task:schema 钉住现状(隐式 Optional),mypy 埋点
+    def modify_scheduled_task(task_id: str, new_time: str = None,  # type: ignore[assignment]
+                              new_description: str = None) -> str:  # type: ignore[assignment]
         """
         修改现有定时任务的时间或内容。
 

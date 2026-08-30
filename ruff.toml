@@ -1,0 +1,13 @@
+# ruff 基线（F7）：默认规则集显式钉死为 E4/E7/E9/F——ruff 新版本扩大过
+# 默认集（0.16 起含 I/UP/DTZ 等行为敏感规则），显式 select 保证不同
+# 版本跑出同一套规则；存量告警已在基线提交内清零。
+extend-exclude = ["workspace", "logs", ".venv", "docs"]
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
+
+[lint.per-file-ignores]
+# 测试文件按章节就地 import（贴近使用处）、bench_pipeline 先 sys.path
+# 引导再 import——E402 是这两种既定形态的固有告警，豁免而非清改
+"tests/**" = ["E402"]
+"benchmarks/bench_pipeline.py" = ["E402"]

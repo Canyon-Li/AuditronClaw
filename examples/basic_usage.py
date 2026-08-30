@@ -7,6 +7,8 @@ from langchain_core.messages import HumanMessage
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from auditronclaw.core.agent import create_agent_app
+from auditronclaw.core.config import WorkspaceConfig
+from auditronclaw.core.logger import init_audit_logger
 
 def main():
     load_dotenv()
@@ -15,8 +17,15 @@ def main():
         return
 
     print("初始化 AuditronClaw 核心引擎...")
-    
-    app = create_agent_app(provider_name="aliyun", model_name="glm-5")
+
+    # 工作区路径是装配期对象(05 票):from_env 是唯一读 AUDITRONCLAW_WORKSPACE
+    # 的地方,缺失即拒绝启动(不臆测默认落点);审计 logger 同在装配期锚定。
+    workspace = WorkspaceConfig.from_env()
+    workspace.ensure_dirs()
+    init_audit_logger(workspace.log_dir)
+
+    app = create_agent_app(provider_name="aliyun", model_name="glm-5",
+                           workspace=workspace)
     
     print("AuditronClaw 启动完毕！你可以开始提问了。(输入 'quit' 或 'q' 退出)")
     print("-" * 50)

@@ -135,7 +135,7 @@ class TestClassifierTargets(unittest.TestCase):
         self.assertEqual(assess.targets, ("office/scripts/a.py",))
 
     def test_write_target_same_normalization_as_execution(self):
-        """带冗余 office/ 前缀与反斜杠的路径,目标归一与执行落点一致。
+        r"""带冗余 office/ 前缀与反斜杠的路径,目标归一与执行落点一致。
 
         反斜杠剥前缀是 Windows 语义(_normalize_office_path 文档):非
         Windows 下 \ 是合法文件名字符,office\scripts\a.py 不剥前缀、

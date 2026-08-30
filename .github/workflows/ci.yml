@@ -25,17 +25,27 @@ jobs:
           pip install pytest
 
       # 豁免项与本地跑法逐字一致,原因:
-      # 1. test_two_phase_skills.py 需要真实 LLM API key(不应进 CI)
-      # 2. test_no_tasks_file 挂在 Windows 文件锁,保持本地/CI 跑法一致
+      # test_no_tasks_file 挂在 Windows 文件锁,保持本地/CI 跑法一致
       - name: 跑全量测试(含红队用例)
         run: >-
           pytest tests/
-          --ignore=tests/test_two_phase_skills.py
           --deselect "tests/test_heartbeat.py::TestHeartbeatPacemaker::test_no_tasks_file"
+
+      # lint/type-check 基线(F7):规则集与检查范围钉在仓库配置里
+      # (ruff.toml / mypy.ini),版本钉死防 ruff 新版扩大默认规则集带来漂移
+      - name: Lint (ruff)
+        run: |
+          pip install ruff==0.16.5
+          ruff check .
+
+      - name: Type check (mypy, 仅 core 起步)
+        run: |
+          pip install mypy==2.3.1
+          mypy
 
   # 双基准冒烟:注入 + golden 各前 3 条 + email/mailbox_desk 新面,验证 runner 没被代码改动弄坏。
   # 刻意只在 schedule/手动触发跑——日常 push 不烧 LLM 调用费,
-  # 全量(注入 56 + golden 39)由维护者本地跑,数字进 README。
+  # 全量(注入 60 + golden 40)由维护者本地跑,数字进 README。
   bench-smoke:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest

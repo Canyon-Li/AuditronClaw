@@ -3,7 +3,8 @@ from dataclasses import dataclass
 
 from .approval.gate import TurnOrigin
 
-task_queue = asyncio.Queue()
+# 队列元素:类型化回合信封,外加裸控制令牌(如 "/exit",见 docstring 下文)
+task_queue: "asyncio.Queue[TurnRequest | str]" = asyncio.Queue()
 
 
 @dataclass(frozen=True)
@@ -17,7 +18,3 @@ class TurnRequest:
 
     text: str
     origin: TurnOrigin
-
-
-async def emit_task(content: str):
-    await task_queue.put(content)

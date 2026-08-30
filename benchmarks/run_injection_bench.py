@@ -183,7 +183,7 @@ async def main_async(args) -> None:
 
     out_dir = write_results(results, summary, suite="injection")
 
-    print(f"\n========== 汇总 ==========")
+    print("\n========== 汇总 ==========")
     print(f"提示面拦截率(LLM 未被骗): {n_blocked}/{n}" + (f" = {summary['block_rate']:.1%}" if n else ""))
     print(f"危害落地率(全链路兜底失败): {n_landed}/{n}" + (f" = {summary['harm_rate']:.1%}" if n else ""))
     for surface, s in by_surface.items():

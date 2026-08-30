@@ -18,7 +18,7 @@
 from dataclasses import dataclass
 from enum import Enum
 from time import monotonic
-from typing import Callable, FrozenSet, List, Optional, Sequence
+from typing import Any, Callable, FrozenSet, List, Optional, Sequence
 
 from langchain_core.runnables import ensure_config
 from langchain_core.tools import BaseTool, StructuredTool
@@ -144,7 +144,7 @@ def _log_approval_decision(thread_id: str, tool_name: str,
                            assessment: RiskAssessment, approved: bool,
                            source: DecisionSource,
                            rule_id: Optional[str] = None) -> None:
-    event = {
+    event: dict[str, Any] = {
         "thread_id": thread_id,
         "event": EVENT_APPROVAL_DECISION,
         "tool": tool_name,
@@ -386,7 +386,7 @@ def wrap_all_tools(
     (外接工具可自带任意元数据),守门判定不能握在被守者手里。
     hooks 原样传给每个包装件(同一观察点盖全部注册工具)。
     """
-    wrapped = []
+    wrapped: List[BaseTool] = []
     for t in tools:
         folder = (t.metadata or {}).get(SKILL_FOLDER_META_KEY, "")
         if t.name in extra_names:

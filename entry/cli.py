@@ -116,7 +116,7 @@ def config_wizard():
                     os.environ[f"{provider.upper()}_BASE_URL"] = base_url
 
             llm = get_provider(provider_name=provider, model_name=model_name)
-            response = llm.invoke([HumanMessage(content="回复我'收到'。")])
+            llm.invoke([HumanMessage(content="回复我'收到'。")])  # 连通性探测:能 invoke 即成功
 
             console.print(" [bold #00ffff][ 配置成功!][/bold #00ffff]")
             

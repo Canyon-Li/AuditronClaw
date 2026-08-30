@@ -179,7 +179,7 @@ async def main_async(args) -> None:
 
     out_dir = write_results(results, summary, suite="golden")
 
-    print(f"\n========== 汇总 ==========")
+    print("\n========== 汇总 ==========")
     print(f"任务通过率: {n_passed}/{n}" + (f" = {summary['pass_rate']:.1%}" if n else ""))
     for surface, s in by_surface.items():
         print(f"  {surface:<16} 通过 {s['passed']}/{s['n']}")

@@ -5,7 +5,7 @@ import json
 import tempfile
 import asyncio
 from datetime import datetime, timedelta
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -263,6 +263,108 @@ class TestHeartbeatTaskQueue(unittest.TestCase):
         # 这是一个集成测试的占位符
         # 实际测试需要 mock task_queue
         self.assertTrue(True)  # 占位断言
+
+
+# ============ 心跳静默吞掉的回执钉子（F3） ============
+#
+# 读盘/写回两处曾经 except Exception 即吞——tasks.json 历史损伤时心跳
+# 永久静默空转、无回执无报错；写回失败时当轮触发消息照发、续期丢失
+# 也无人知晓。修法：两处各落一条审计回执；读盘失败加去抖（同一错误
+# 只记一次——坏文件每个周期都撞同一处，回执记首次，修复后重置）。
+
+class TestHeartbeatErrorReceipts(unittest.TestCase):
+    """损坏队列/写回失败：心跳照常空转，但审计必须留下事件。"""
+
+    def setUp(self):
+        from auditronclaw.core import heartbeat
+        heartbeat._last_read_error_key = None  # 去抖状态隔离，测试间互不串台
+        fd, path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        os.unlink(path)
+        self.temp_path = path
+
+    def tearDown(self):
+        if os.path.exists(self.temp_path):
+            os.unlink(self.temp_path)
+        if os.path.exists(self.temp_path + ".tmp"):
+            os.unlink(self.temp_path + ".tmp")
+
+    def _run_pacemaker(self, seconds=0.3):
+        """跑起搏器若干秒后取消，返回它的任务队列。"""
+        from auditronclaw.core.heartbeat import pacemaker_loop
+
+        queue = asyncio.Queue()
+
+        async def drill():
+            worker = asyncio.create_task(
+                pacemaker_loop(task_queue=queue, tasks_file=self.temp_path,
+                               check_interval=0.05))
+            await asyncio.sleep(seconds)
+            worker.cancel()
+            try:
+                await worker
+            except asyncio.CancelledError:
+                pass
+
+        asyncio.run(drill())
+        return queue
+
+    @staticmethod
+    def _logged_contents(mock_logger, keyword):
+        """从 mock logger 的调用里筛出含关键字的 content 列表。"""
+        return [call.kwargs.get("content", "")
+                for call in mock_logger.log_event.call_args_list
+                if keyword in call.kwargs.get("content", "")]
+
+    def test_corrupt_tasks_json_logs_read_failure_once(self):
+        """损坏 JSON：心跳空转不抛，读失败回执恰一条（去抖），无触发消息"""
+        with open(self.temp_path, "w", encoding="utf-8") as f:
+            f.write("{not valid json")
+
+        mock_logger = MagicMock()
+        with patch("auditronclaw.core.logger._audit_logger", mock_logger):
+            queue = self._run_pacemaker(seconds=0.3)  # ~6 个周期撞同一处坏 JSON
+
+        read_failures = self._logged_contents(mock_logger, "读任务队列失败")
+        self.assertEqual(len(read_failures), 1,
+                         "同一读错误跨周期只记一次（去抖）")
+        self.assertIn(self.temp_path, read_failures[0])
+        self.assertTrue(queue.empty(), "坏队列不得触发任何任务消息")
+
+    def test_write_back_failure_logs_event_and_still_fires(self):
+        """写回失败：触发消息照发、回执逐次落账、队列保持旧内容
+
+        写回持续失败时任务文件保持旧内容，任务下一周期会再次到期触发
+        （既有语义，本票不改）——断言按此形态：每次触发必有同数回执，
+        续期丢失不静默。
+        """
+        past_time = (datetime.now() - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+        with open(self.temp_path, "w", encoding="utf-8") as f:
+            json.dump([{
+                "id": "t1", "target_time": past_time,
+                "description": "到期任务", "repeat": None, "repeat_count": None,
+            }], f, ensure_ascii=False)
+
+        mock_logger = MagicMock()
+        with patch("auditronclaw.core.logger._audit_logger", mock_logger), \
+             patch("auditronclaw.core.heartbeat._write_tasks",
+                   side_effect=OSError("disk full")):
+            queue = self._run_pacemaker(seconds=0.3)
+
+        # 触发消息照发（这是既有行为，写失败不吞掉已到期提醒）
+        fired = []
+        while not queue.empty():
+            fired.append(queue.get_nowait())
+        self.assertGreaterEqual(len(fired), 1, "写回失败不影响当轮触发消息")
+
+        write_failures = self._logged_contents(mock_logger, "写回任务队列失败")
+        self.assertEqual(len(write_failures), len(fired),
+                         "每次写回失败必须留下事件——续期丢失不可静默")
+        self.assertIn("disk full", write_failures[0])
+        # 队列文件未被改写（续期丢失即旧内容原样——事件里说清了这个后果）
+        with open(self.temp_path, encoding="utf-8") as f:
+            tasks = json.load(f)
+        self.assertEqual(tasks[0]["target_time"], past_time)
 
 
 # ============ 心跳 daily 任务真实运行演练（邮箱事务台部署接线）============

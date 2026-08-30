@@ -73,7 +73,7 @@ class TestWriteFailureFallback(unittest.TestCase):
             self.assertTrue(os.path.exists(fallback), "主写失败的事件必须可发现,不得静默丢弃")
             with open(fallback, encoding="utf-8") as f:
                 lines = [json.loads(line) for line in f if line.strip()]
-            hit = next(l for l in lines if l.get("marker") == marker)
+            hit = next(row for row in lines if row.get("marker") == marker)
             self.assertEqual(hit["event"], "audit_hardening_test", "兜底行保持事件原字段")
             self.assertTrue(hit.get("fallback_reason"), "兜底行须附失败缘由")
 
@@ -89,7 +89,7 @@ class TestWriteFailureFallback(unittest.TestCase):
             self.assertTrue(os.path.exists(fallback), "不可序列化事件也必须留可发现痕迹")
             with open(fallback, encoding="utf-8") as f:
                 lines = [json.loads(line) for line in f if line.strip()]
-            hit = next(l for l in lines if l.get("marker") == "unserializable-9f2a")
+            hit = next(row for row in lines if row.get("marker") == "unserializable-9f2a")
             self.assertEqual(hit["event"], "audit_hardening_test", "兜底行保持事件原字段")
             self.assertTrue(hit.get("fallback_reason"), "兜底行须附失败缘由")
 

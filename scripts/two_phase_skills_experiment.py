@@ -1,3 +1,9 @@
+"""两阶段技能（先读说明书再执行）vs 单阶段直选的手动对比实验。
+
+走真实 LLM provider 的手动脚本（run_experiment()），不是测试——曾放
+tests/ 下但收集 0 用例，移出到 scripts/ 保持 pytest 收集卫生。
+直接运行：python scripts/two_phase_skills_experiment.py
+"""
 import os
 import time
 import uuid
@@ -154,7 +160,8 @@ def create_mock_tools() -> tuple[List[StructuredTool], List[StructuredTool]]:
             if mode == "help":
                 return f"[说明书] {_manual}\n如果符合需求请用 run 执行；若有风险，请务必反悔并去 help 其他工具。"
             elif mode == "run":
-                if not _is_correct: return f"[FATAL] 严重事故！说明书都写了不能用，你还强行 run！"
+                if not _is_correct:
+                    return "[FATAL] 严重事故！说明书都写了不能用，你还强行 run！"
                 return f"[SUCCESS] {_name}"
             return "模式错误。"
 
@@ -167,7 +174,8 @@ def create_mock_tools() -> tuple[List[StructuredTool], List[StructuredTool]]:
 
 # 2. Agent 组装器 
 def build_test_agent(tools: List[StructuredTool], is_dual_stage: bool):
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    env_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
     load_dotenv(env_path)
     current_provider = os.getenv("DEFAULT_PROVIDER", "aliyun")
     current_model = os.getenv("DEFAULT_MODEL", "glm-5")
@@ -201,7 +209,7 @@ def build_test_agent(tools: List[StructuredTool], is_dual_stage: bool):
 
 # 3. 评测主循环 
 def run_experiment():
-    print(f"========== 🚀 启动20个场景下LLM调用工具测试 ==========")
+    print("========== 🚀 启动20个场景下LLM调用工具测试 ==========")
     single_tools, dual_tools = create_mock_tools()
     
     agent_single = build_test_agent(single_tools, is_dual_stage=False)
@@ -231,9 +239,12 @@ def run_experiment():
             actions = []
             for msg in messages:
                 if msg.type == "tool":
-                    if "[HELP]" in msg.content or "[说明书]" in msg.content: actions.append("读说明书反悔")
-                    elif "[SUCCESS]" in msg.content: actions.append("✅ 命中")
-                    elif "[FATAL]" in msg.content: actions.append("🔴 踩雷")
+                    if "[HELP]" in msg.content or "[说明书]" in msg.content:
+                        actions.append("读说明书反悔")
+                    elif "[SUCCESS]" in msg.content:
+                        actions.append("✅ 命中")
+                    elif "[FATAL]" in msg.content:
+                        actions.append("🔴 踩雷")
 
             if "✅ 命中" in actions and "🔴 踩雷" not in actions:
                 success_count += 1
@@ -259,7 +270,7 @@ def run_experiment():
     print("\n" + "🌟"*22)
     print("      📊 20个场景下的工具调用报告")
     print("🌟"*22)
-    print(f"考点测试：大语言模型在严重语义干扰下的决策与回退能力")
+    print("考点测试：大语言模型在严重语义干扰下的决策与回退能力")
     print("-" * 75)
     print(f"{'架构模式':<20} | {'完美/安全完成率':<18} | {'触发P0事故数':<15} | {'平均单题耗时':<15}")
     print("-" * 75)

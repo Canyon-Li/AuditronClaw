@@ -201,8 +201,11 @@ def _drive(engine: SessionEngine, text: str, origin=None) -> list:
 
 # ============ interrupt + resume:人来源回合的问人-续行 ============
 
-APPROVE_ONCE = lambda req: ApprovalDecision(True, False, DecisionSource.USER_ONCE)
-DENY_ONCE = lambda req: ApprovalDecision(False, False, DecisionSource.USER_ONCE)
+def APPROVE_ONCE(req):
+    return ApprovalDecision(True, False, DecisionSource.USER_ONCE)
+
+def DENY_ONCE(req):
+    return ApprovalDecision(False, False, DecisionSource.USER_ONCE)
 
 
 class TestInterruptApproveAndDeny(unittest.TestCase):
@@ -285,7 +288,6 @@ class TestInterruptApproveAndDeny(unittest.TestCase):
                         {"filepath": "reports/daily.md", "content": "x"}),
             AIMessage(content="完成。"),
         ]
-        from auditronclaw.core.approval.rules import RuleStore
         with ExitStack() as stack:
             workspace = WorkspaceConfig.from_root(tempfile.mkdtemp(prefix="rule_hit_"))
             workspace.ensure_dirs()
@@ -304,7 +306,8 @@ class TestInterruptApproveAndDeny(unittest.TestCase):
             app = create_agent_app(provider_name="fake", model_name="fake-model",
                                    workspace=workspace,
                                    checkpointer=MemorySaver(), thread_id="rule_hit_test")
-            responder = lambda req: self.fail("规则命中的调用不得问人")
+            def responder(req):
+                self.fail("规则命中的调用不得问人")
             engine = SessionEngine(app, "rule_hit_test", approval_responder=responder)
             events = _drive(engine, "写日报", origin=TurnOrigin.HUMAN)
 
@@ -463,7 +466,7 @@ class TestApprovalTimeout(unittest.TestCase):
             engine = SessionEngine(app, "no_responder_test",
                                    approval_timeout=30)
             start = time.monotonic()
-            events = _drive(engine, "写日报", origin=TurnOrigin.HUMAN)
+            _drive(engine, "写日报", origin=TurnOrigin.HUMAN)
             elapsed = time.monotonic() - start
 
         self.assertLess(elapsed, 5, "无应答通道时不得等满超时才拒")

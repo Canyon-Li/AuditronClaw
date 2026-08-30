@@ -598,8 +598,9 @@ class TestTuiBridgeEndToEnd(unittest.TestCase):
                   {"filepath": "reports/daily.md", "content": "x"}),
             AIMessage(content="已写完。"),
         ]
-        read = lambda req: _nowait(
-            ApprovalDecision(True, False, DecisionSource.USER_ONCE))
+        def read(req):
+            return _nowait(
+                ApprovalDecision(True, False, DecisionSource.USER_ONCE))
         with ExitStack() as stack:
             app, _rules_path = _build_app(stack, script, [_write_stub(calls)])
             bridge = tui_main.ApprovalBridge()
@@ -622,8 +623,9 @@ class TestTuiBridgeEndToEnd(unittest.TestCase):
                   {"filepath": "reports/daily.md", "content": "y"}),
             AIMessage(content="第二回合完成。"),
         ]
-        read = lambda req: _nowait(
-            ApprovalDecision(True, True, DecisionSource.USER_PERSIST))
+        def read(req):
+            return _nowait(
+                ApprovalDecision(True, True, DecisionSource.USER_PERSIST))
 
         async def scenario(app, bridge, engine):
             first = await _run_turn_answered(engine, bridge, read)
@@ -655,8 +657,9 @@ class TestTuiBridgeEndToEnd(unittest.TestCase):
                   {"filepath": "reports/daily.md", "content": "x"}),
             AIMessage(content="未获批准,已放弃。"),
         ]
-        read = lambda req: _nowait(
-            ApprovalDecision(False, False, DecisionSource.USER_ONCE))
+        def read(req):
+            return _nowait(
+                ApprovalDecision(False, False, DecisionSource.USER_ONCE))
         with ExitStack() as stack:
             app, _rules_path = _build_app(stack, script, [_write_stub(calls)])
             bridge = tui_main.ApprovalBridge()

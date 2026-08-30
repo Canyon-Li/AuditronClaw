@@ -12,7 +12,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from helpers import FakeSender, InjectedSender
 
-from auditronclaw.core.tools import feishu_tool
 from auditronclaw.core.tools.desk_tool import create_desk_submit_tool
 
 
