@@ -25,6 +25,19 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 # 导入即登记：注册表条目挂在传输定义模块上
 from auditronclaw.core.tools import feishu_tool, mail_tool  # noqa: F401
 from auditronclaw.core.tools.egress import egress_channels
+from auditronclaw.core.logger import init_audit_logger
+
+
+@pytest.fixture(autouse=True, scope="session")
+def session_audit_logger(tmp_path_factory):
+    """会话级审计锚(05 票):测试进程的审计统一落临时目录。
+
+    审计 logger 是装配期对象(入口 init_audit_logger 构造一次),测试进程
+    没有入口——本夹具即是入口:不初始化则任何走审计的代码路径
+    get_audit_logger() 即拒;初始化到仓库 workspace/logs 则测试写脏生产
+    落点。需要截获事件的测试 patch auditronclaw.core.logger._audit_logger。
+    """
+    init_audit_logger(str(tmp_path_factory.mktemp("audit_logs")))
 
 # (通道名) 触碰账。
 _TOUCHES = []

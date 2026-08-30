@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from .base import auditronclaw_tool, AuditronClawBaseTool
-from .desk_tool import submit_mailbox_desk_report
+from .desk_tool import create_desk_submit_tool
 import ast
 import operator
 import os
@@ -12,20 +12,14 @@ import json
 import uuid
 import threading
 from difflib import unified_diff
-from ..config import MEMORY_DIR, TASKS_FILE
-from ..logger import audit_logger
-from .sandbox_tools import (
-    list_office_files,
-    read_office_file,
-    write_office_file,
-    execute_office_shell
-)
+from ..config import WorkspaceConfig
+from ..logger import get_audit_logger
+from .sandbox_tools import build_office_tools
 from .feishu_tool import send_feishu_summary
 from .mail_tool import read_recent_emails
 
 
 tasks_lock = threading.Lock()
-PROFILE_PATH = os.path.join(MEMORY_DIR, "user_profile.md")
 
 # AST 节点白名单:calculator 仅接受纯算术表达式(P0-2,eval RCE 修复)
 _BIN_OPS = {
@@ -89,7 +83,7 @@ def get_system_model_info() -> str:
     return f"当前使用的模型提供商(Provider)是: {provider}，具体型号(Model)是: {model}。"
 
 
-def _check_thread_id(thread_id: str) -> str:
+def _check_thread_id(thread_id: str, memory_dir: str) -> str:
     """thread_id 归一化校验(审批门 05 票):画像落点锁死在 memory/profiles/ 内。
 
     thread_id 由操作员/会话层/基准适配器提供、bake 进画像工具,LLM 的参数面
@@ -104,7 +98,7 @@ def _check_thread_id(thread_id: str) -> str:
         raise ValueError(f"thread_id 含上跳或盘符形态,拒绝: {thread_id!r}")
     if thread_id[0] in "/\\":
         raise ValueError(f"thread_id 是绝对路径形态,拒绝: {thread_id!r}")
-    base = os.path.normcase(os.path.abspath(os.path.join(MEMORY_DIR, "profiles")))
+    base = os.path.normcase(os.path.abspath(os.path.join(memory_dir, "profiles")))
     target = os.path.normcase(
         os.path.abspath(os.path.join(base, thread_id + ".md")))
     if not target.startswith(base + os.sep):
@@ -112,20 +106,20 @@ def _check_thread_id(thread_id: str) -> str:
     return thread_id
 
 
-def _profile_path(thread_id: str) -> str:
+def _profile_path(thread_id: str, memory_dir: str) -> str:
     """按会话返回画像文件路径:memory/profiles/<thread_id>.md(归一化后落点锁死)"""
-    return os.path.join(MEMORY_DIR, "profiles", f"{_check_thread_id(thread_id)}.md")
+    return os.path.join(memory_dir, "profiles", f"{_check_thread_id(thread_id, memory_dir)}.md")
 
 
-def create_profile_tool(thread_id: str):
+def create_profile_tool(thread_id: str, memory_dir: str):
     """
     按会话构造 save_user_profile 工具(工厂)。
-    会话身份在此 bake 进闭包——工具层无需知道当前 thread_id,
-    调用方(agent 创建工具时)按会话传入即可。
+    会话身份与画像落点(memory_dir)在此 bake 进闭包——工具层无需知道
+    当前 thread_id 与工作区,调用方(agent 创建工具时)按会话注入即可。
     thread_id 组装期即归一化(非法 id 当场拒,不等到首调才炸)。
     画像写入前读旧内容做行级 diff,记入审计日志(画像变更留痕)。
     """
-    _check_thread_id(thread_id)
+    profile_path = _profile_path(thread_id, memory_dir)
 
     @auditronclaw_tool
     def save_user_profile(new_content: str) -> str:
@@ -137,8 +131,6 @@ def create_profile_tool(thread_id: str):
         3.将修改后的一整篇完整 Markdown 文本作为 new_content 参数传入此工具。
         注意：此操作将完全覆盖旧文件！请确保传入的是完整的最新档案。
         """
-        # 画像路径在调用时解析(而非 bake),便于测试 patch MEMORY_DIR
-        profile_path = _profile_path(thread_id)
 
         # 写入留痕:写前读旧内容,行级 diff 记入审计日志
         old_lines = []
@@ -149,7 +141,7 @@ def create_profile_tool(thread_id: str):
 
         diff = "".join(unified_diff(old_lines, new_lines, fromfile="旧画像", tofile="新画像", lineterm=""))
         if diff:
-            audit_logger.log_event(
+            get_audit_logger().log_event(
                 thread_id=thread_id,
                 event="system_action",
                 content=f"画像变更留痕:\n{diff}"
@@ -164,20 +156,16 @@ def create_profile_tool(thread_id: str):
     return save_user_profile
 
 
-def migrate_legacy_profile(thread_id: str) -> None:
+def migrate_legacy_profile(thread_id: str, memory_dir: str) -> None:
     """
     迁移旧版全局画像:若 memory/user_profile.md 存在且该会话画像不存在,
     将其移入 memory/profiles/<thread_id>.md。一次性,幂等。
     """
-    legacy = os.path.join(MEMORY_DIR, "user_profile.md")
-    target = _profile_path(thread_id)
+    legacy = os.path.join(memory_dir, "user_profile.md")
+    target = _profile_path(thread_id, memory_dir)
     if os.path.exists(legacy) and not os.path.exists(target):
         os.makedirs(os.path.dirname(target), exist_ok=True)
         os.replace(legacy, target)
-
-
-# 默认会话的画像工具(兼容旧调用;agent 应优先用 create_profile_tool 按会话构造)
-save_user_profile = create_profile_tool("local_geek_master")
 
 
 @auditronclaw_tool
@@ -204,8 +192,8 @@ def calculator(expression: str) -> str:
         return f"计算出错，请检查表达式格式。错误信息: {str(e)}"
 
 
-def _write_tasks(tasks) -> None:
-    """tasks.json 原子落盘:同目录 tmp 写入 → flush+fsync → os.replace。
+def _write_tasks(tasks, tasks_file: str) -> None:
+    """tasks 队列原子落盘(落点为装配期入参):同目录 tmp 写入 → flush+fsync → os.replace。
 
     威胁模型:进程崩溃与断电把队列文件写成半截 JSON——tasks.json 是
     定时任务队列的唯一样本(排程、删除、修改、心跳续期都写它;事务台
@@ -219,11 +207,11 @@ def _write_tasks(tasks) -> None:
     锁约定:调用方须已持有 tasks_lock——本函数不自取(非重入锁,
     自取即把持锁调用方挂死)。
     """
-    with open(TASKS_FILE + ".tmp", "w", encoding="utf-8") as f:
+    with open(tasks_file + ".tmp", "w", encoding="utf-8") as f:
         json.dump(tasks, f, ensure_ascii=False, indent=2)
         f.flush()
         os.fsync(f.fileno())
-    os.replace(TASKS_FILE + ".tmp", TASKS_FILE)
+    os.replace(tasks_file + ".tmp", tasks_file)
 
 
 TASK_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -279,7 +267,7 @@ def _validated_tasks(raw_tasks) -> list[ScheduledTask]:
             ident = ""
             if isinstance(raw, dict) and raw.get("id"):
                 ident = f"（条目 {raw['id']}）"
-            audit_logger.log_event(
+            get_audit_logger().log_event(
                 thread_id="system",
                 event="system_action",
                 content=(
@@ -290,9 +278,9 @@ def _validated_tasks(raw_tasks) -> list[ScheduledTask]:
     return valid
 
 
-def _append_task(target_time: str, description: str, repeat: str = None, repeat_count: int = None) -> None:
+def _append_task(tasks_file: str, target_time: str, description: str, repeat: str = None, repeat_count: int = None) -> None:
     """
-    向任务队列文件追加一条任务（线程锁内读-改-写）。
+    向任务队列文件追加一条任务（线程锁内读-改-写，落点为装配期入参）。
 
     追加任务条目的唯一入口：schedule_task 与事务台提交工具共用，
     不管条目是人定的还是事务台从邮件提炼的。条目形状由 ScheduledTask
@@ -309,9 +297,9 @@ def _append_task(target_time: str, description: str, repeat: str = None, repeat_
     )
     with tasks_lock:
         tasks = []
-        if os.path.exists(TASKS_FILE):
+        if os.path.exists(tasks_file):
             try:
-                with open(TASKS_FILE, "r", encoding="utf-8") as f:
+                with open(tasks_file, "r", encoding="utf-8") as f:
                     content = f.read().strip()
                     if content:
                         tasks = json.loads(content)
@@ -321,216 +309,221 @@ def _append_task(target_time: str, description: str, repeat: str = None, repeat_
         tasks.append(task.model_dump())
 
         try:
-            _write_tasks(tasks)
+            _write_tasks(tasks, tasks_file)
         except Exception as e:
             raise RuntimeError(f"写入任务队列异常 {str(e)}")
 
 
-@auditronclaw_tool
-def schedule_task(target_time: str, description: str, repeat: str = None, repeat_count: int = None) -> str:
+def create_task_tools(tasks_file: str) -> list:
+    """定时任务工具装配工厂：四个工具闭包共享同一装配期队列落点。
+
+    队列路径不进模块级常量（05 票）：入口按工作区装配一次，测试与基准
+    各装配各的临时队列文件，互不串台。
     """
-    为一个未来的任务设定闹钟或提醒。
-    参数 target_time 必须是严格的格式："YYYY-MM-DD HH:MM:SS"（请先调用 get_current_time 获取当前时间，并在其基础上推算）。
-    参数 description 是需要执行的动作或要说的话。
-    
-    【高级循环功能】：
-    - repeat (可选): 设置重复频率。可选值为 "hourly", "daily", "weekly", "monthly"。如果不重复请留空。
-    - repeat_count (可选): 结合 repeat 使用，表示一共需要触发几次。
-    
-    【案例教学】：
-    1. 用户说："以后每天8点提醒我喝牛奶" -> repeat="daily", repeat_count=None (无限循环)
-    2. 用户说："接下来的3天，每天提醒我吃药" -> repeat="daily", repeat_count=3 (有限循环)
-    3. 用户说："明早8点叫我起床" -> repeat=None, repeat_count=None (单次任务)
+    @auditronclaw_tool
+    def schedule_task(target_time: str, description: str, repeat: str = None, repeat_count: int = None) -> str:
+        """
+        为一个未来的任务设定闹钟或提醒。
+        参数 target_time 必须是严格的格式："YYYY-MM-DD HH:MM:SS"（请先调用 get_current_time 获取当前时间，并在其基础上推算）。
+        参数 description 是需要执行的动作或要说的话。
 
-    【时间歧义严格确认协议 (AM/PM Ambiguity CRITICAL)】：
-    当用户说出的时间存在 12 小时制的模糊性时（例如：只说了“7点”，没明确说早上还是晚上）：
-    1. 你必须向用户提问确认是上午还是下午。
-    2. 【死命令】：在用户明确回复“上午”或“下午”（或改为24小时制）之前，本工具处于【绝对锁定状态】！
-    3. 就算用户发省略号（如“。。”）、发脾气、或者说无关内容，你也【绝对禁止】为了讨好用户而自行猜测时间！
-    4. 严禁出现“抱歉多问了”、“默认早上”这种妥协行为。
-    5. 如果用户不明确回答，你必须坚定地回复：“抱歉，没有明确上下午，我无权为您设置闹钟。请明确告知时间段。”并立即中止工具调用。
-    """
-    try:
-        target_dt = datetime.strptime(target_time, "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        return "设定失败：时间格式错误，必须严格遵循 'YYYY-MM-DD HH:MM:SS' 格式。"
-    
-    now = datetime.now()
-    if target_dt <= now:
-        return (
-            "设定失败：target_time 必须晚于当前时间。"
-            f" 当前时间：{now.strftime('%Y-%m-%d %H:%M:%S')}，"
-            f" 你传入的是：{target_time}"
-        )
+        【高级循环功能】：
+        - repeat (可选): 设置重复频率。可选值为 "hourly", "daily", "weekly", "monthly"。如果不重复请留空。
+        - repeat_count (可选): 结合 repeat 使用，表示一共需要触发几次。
 
-    try:
-        _append_task(target_time, description, repeat, repeat_count)
-    except ValidationError:
-        return (
-            "设定失败：repeat 取值非法，可选值为 hourly/daily/weekly/monthly"
-            "（不重复请留空）。"
-        )
-    except RuntimeError as e:
-        return f"设定失败：{str(e)}"
+        【案例教学】：
+        1. 用户说："以后每天8点提醒我喝牛奶" -> repeat="daily", repeat_count=None (无限循环)
+        2. 用户说："接下来的3天，每天提醒我吃药" -> repeat="daily", repeat_count=3 (有限循环)
+        3. 用户说："明早8点叫我起床" -> repeat=None, repeat_count=None (单次任务)
 
-    msg = f" 任务已成功加入队列。首发时间：{target_time} | 任务：{description}"
-    if repeat:
-        msg += f" | 循环模式：{repeat} (共 {repeat_count if repeat_count else '无限'} 次)"
-    return msg
+        【时间歧义严格确认协议 (AM/PM Ambiguity CRITICAL)】：
+        当用户说出的时间存在 12 小时制的模糊性时（例如：只说了“7点”，没明确说早上还是晚上）：
+        1. 你必须向用户提问确认是上午还是下午。
+        2. 【死命令】：在用户明确回复“上午”或“下午”（或改为24小时制）之前，本工具处于【绝对锁定状态】！
+        3. 就算用户发省略号（如“。。”）、发脾气、或者说无关内容，你也【绝对禁止】为了讨好用户而自行猜测时间！
+        4. 严禁出现“抱歉多问了”、“默认早上”这种妥协行为。
+        5. 如果用户不明确回答，你必须坚定地回复：“抱歉，没有明确上下午，我无权为您设置闹钟。请明确告知时间段。”并立即中止工具调用。
+        """
+        try:
+            target_dt = datetime.strptime(target_time, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return "设定失败：时间格式错误，必须严格遵循 'YYYY-MM-DD HH:MM:SS' 格式。"
 
-
-@auditronclaw_tool
-def list_scheduled_tasks() -> str:
-    """
-    查看当前所有待处理的定时任务列表。
-    当用户询问“我都有哪些任务”、“查一下闹钟”、“刚才定了什么”时调用此工具。
-    """
-    with tasks_lock:
-        if not os.path.exists(TASKS_FILE):
-            return "当前没有任何定时任务。"
+        now = datetime.now()
+        if target_dt <= now:
+            return (
+                "设定失败：target_time 必须晚于当前时间。"
+                f" 当前时间：{now.strftime('%Y-%m-%d %H:%M:%S')}，"
+                f" 你传入的是：{target_time}"
+            )
 
         try:
-            with open(TASKS_FILE, "r", encoding="utf-8") as f:
-                content = f.read().strip()
-                if not content:
-                    return "任务列表为空。"
-                raw_tasks = json.loads(content)
-        except Exception as e:
-            return f"查询失败：{str(e)}"
+            _append_task(tasks_file, target_time, description, repeat, repeat_count)
+        except ValidationError:
+            return (
+                "设定失败：repeat 取值非法，可选值为 hourly/daily/weekly/monthly"
+                "（不重复请留空）。"
+            )
+        except RuntimeError as e:
+            return f"设定失败：{str(e)}"
 
-        # 文件边界统一校验：坏条目记回执跳过，好条目照常渲染
-        tasks = _validated_tasks(raw_tasks)
+        msg = f" 任务已成功加入队列。首发时间：{target_time} | 任务：{description}"
+        if repeat:
+            msg += f" | 循环模式：{repeat} (共 {repeat_count if repeat_count else '无限'} 次)"
+        return msg
 
-        if not tasks:
-            return "当前没有任何定时任务。"
+    @auditronclaw_tool
+    def list_scheduled_tasks() -> str:
+        """
+        查看当前所有待处理的定时任务列表。
+        当用户询问“我都有哪些任务”、“查一下闹钟”、“刚才定了什么”时调用此工具。
+        """
+        with tasks_lock:
+            if not os.path.exists(tasks_file):
+                return "当前没有任何定时任务。"
 
-        tasks.sort(key=lambda t: t.target_time)
+            try:
+                with open(tasks_file, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                    if not content:
+                        return "任务列表为空。"
+                    raw_tasks = json.loads(content)
+            except Exception as e:
+                return f"查询失败：{str(e)}"
 
-        res = " 当前待执行任务列表：\n"
-        for t in tasks:
-            res += f"- [ID: {t.id}] 时间: {t.target_time} | 任务: {t.description}\n"
-        return res
-    
+            # 文件边界统一校验：坏条目记回执跳过，好条目照常渲染
+            tasks = _validated_tasks(raw_tasks)
 
-@auditronclaw_tool
-def delete_scheduled_task(task_id: str) -> str:
+            if not tasks:
+                return "当前没有任何定时任务。"
+
+            tasks.sort(key=lambda t: t.target_time)
+
+            res = " 当前待执行任务列表：\n"
+            for t in tasks:
+                res += f"- [ID: {t.id}] 时间: {t.target_time} | 任务: {t.description}\n"
+            return res
+
+    @auditronclaw_tool
+    def delete_scheduled_task(task_id: str) -> str:
+        """
+        根据 ID 取消或删除一个定时任务。
+
+        【强制性风险控制协议 (CRITICAL)】：
+        删除操作具有不可逆性。
+        1. 只要匹配到符合描述的任务数量 > 1。
+        2. 无论用户语气多么确定，只要他没提供具体的任务 ID。
+
+        【你必须执行的动作】：
+        【禁止】在单次回复中针对同一个模糊描述发起多个删除工具调用。
+        你必须先列出所有匹配的任务（1. 2. 3.），并询问用户：
+        “发现了多个符合条件的提醒（列出列表），为了安全起见，请问是要全部删除，还是只删除其中几个？”
+        必须要用户明确给出编号或者说确定全部删除，才能调用此工具！！
+        严禁自作主张执行批量删除。
+        """
+
+        with tasks_lock:
+            if not os.path.exists(tasks_file):
+                return "删除失败：任务列表文件不存在。"
+
+            try:
+                with open(tasks_file, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                    raw_tasks = json.loads(content) if content else []
+            except Exception as e:
+                return f"操作异常：{str(e)}"
+
+            tasks = _validated_tasks(raw_tasks)
+            new_tasks = [t for t in tasks if t.id != task_id]
+
+            if len(new_tasks) == len(tasks):
+                return f"删除失败：未找到 ID 为 {task_id} 的任务。"
+
+            try:
+                _write_tasks([t.model_dump() for t in new_tasks], tasks_file)
+            except Exception as e:
+                return f"操作异常：{str(e)}"
+
+            return f" 任务 [ID: {task_id}] 已成功取消。"
+
+    @auditronclaw_tool
+    def modify_scheduled_task(task_id: str, new_time: str = None, new_description: str = None) -> str:
+        """
+        修改现有定时任务的时间或内容。
+
+        【强制性风险控制协议 (CRITICAL)】：
+        1. 只要用户通过“模糊描述”（如：那个5天的任务、洗澡的任务）来要求修改，而没有直接提供 ID。
+        2. 无论用户的话语看起来是单数还是复数（如：“把5天的任务全改了”）。
+        3. 只要系统中匹配到的任务数量 > 1。
+
+        【你必须执行的动作】：
+        禁止直接调用本工具！你必须向用户展示匹配到的所有任务列表，并强制询问：
+        “我发现有 [N] 个任务符合描述（列出列表），请问你是要【全部修改】，还是修改其中【某几个】？（请告诉我编号或确认全部）”
+
+        必须在用户回复“全部”或者指定了具体编号后，你才能继续操作！修改任务并非小事,这是为了安全！！
+        """
+
+        with tasks_lock:
+            if not os.path.exists(tasks_file):
+                return "修改失败：任务列表为空。"
+
+            try:
+                with open(tasks_file, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                    raw_tasks = json.loads(content) if content else []
+            except Exception as e:
+                return f"操作异常：{str(e)}"
+
+            tasks = _validated_tasks(raw_tasks)
+
+            found = False
+            for t in tasks:
+                if t.id == task_id:
+                    if new_time:
+                        try:
+                            parsed_new_time = datetime.strptime(new_time, TASK_TIME_FORMAT)
+                        except ValueError:
+                            return "修改失败：时间格式错误。"
+                        now = datetime.now()
+                        if parsed_new_time <= now:
+                            return (
+                                "修改失败：new_time 必须晚于当前时间。"
+                                f" 当前时间：{now.strftime('%Y-%m-%d %H:%M:%S')}，"
+                                f" 你传入的是：{new_time}"
+                            )
+                        t.target_time = new_time
+                    if new_description:
+                        t.description = new_description
+                    found = True
+                    break
+
+            if not found:
+                return f"修改失败：未找到 ID 为 {task_id} 的任务。"
+
+            try:
+                _write_tasks([t.model_dump() for t in tasks], tasks_file)
+            except Exception as e:
+                return f"操作异常：{str(e)}"
+
+            return f" 任务 [ID: {task_id}] 已成功更新。"
+
+    return [schedule_task, list_scheduled_tasks, delete_scheduled_task, modify_scheduled_task]
+
+
+def build_builtin_tools(workspace: WorkspaceConfig, thread_id: str) -> list:
+    """内置工具集装配工厂：工作区路径与会话身份在此注入，一次装配全套。
+
+    路径不进模块级常量（05 票）：入口从工作区装配 WorkspaceConfig 传入，
+    工具经工厂闭包持有落点——测试与基准各装配各的临时工作区，互不串台。
     """
-    根据任务 ID 取消或删除一个定时任务。
-    
-    【强制性风险控制协议 (CRITICAL)】：
-    删除操作具有不可逆性。
-    1. 只要匹配到符合描述的任务数量 > 1。
-    2. 无论用户语气多么确定，只要他没提供具体的任务 ID。
-    
-    【你必须执行的动作】：
-    【禁止】在单次回复中针对同一个模糊描述发起多个删除工具调用。
-    你必须先列出所有匹配的任务（1. 2. 3.），并询问用户：
-    “发现了多个符合条件的提醒（列出列表），为了安全起见，请问是要全部删除，还是只删除其中几个？”
-    必须要用户明确给出编号或者说确定全部删除，才能调用此工具！！
-    严禁自作主张执行批量删除。
-    """
-
-    with tasks_lock:
-        if not os.path.exists(TASKS_FILE):
-            return "删除失败：任务列表文件不存在。"
-
-        try:
-            with open(TASKS_FILE, "r", encoding="utf-8") as f:
-                content = f.read().strip()
-                raw_tasks = json.loads(content) if content else []
-        except Exception as e:
-            return f"操作异常：{str(e)}"
-
-        tasks = _validated_tasks(raw_tasks)
-        new_tasks = [t for t in tasks if t.id != task_id]
-
-        if len(new_tasks) == len(tasks):
-            return f"删除失败：未找到 ID 为 {task_id} 的任务。"
-
-        try:
-            _write_tasks([t.model_dump() for t in new_tasks])
-        except Exception as e:
-            return f"操作异常：{str(e)}"
-
-        return f" 任务 [ID: {task_id}] 已成功取消。"
-    
-
-@auditronclaw_tool
-def modify_scheduled_task(task_id: str, new_time: str = None, new_description: str = None) -> str:
-    """
-    修改现有定时任务的时间或内容。
-    
-    【强制性风险控制协议 (CRITICAL)】：
-    1. 只要用户通过“模糊描述”（如：那个5天的任务、洗澡的任务）来要求修改，而没有直接提供 ID。
-    2. 无论用户的话语看起来是单数还是复数（如：“把5天的任务全改了”）。
-    3. 只要系统中匹配到的任务数量 > 1。
-    
-    【你必须执行的动作】：
-    禁止直接调用本工具！你必须向用户展示匹配到的所有任务列表，并强制询问：
-    “我发现有 [N] 个任务符合描述（列出列表），请问你是要【全部修改】，还是修改其中【某几个】？（请告诉我编号或确认全部）”
-    
-    必须在用户回复“全部”或者指定了具体编号后，你才能继续操作！修改任务并非小事,这是为了安全！！
-    """
-
-    with tasks_lock:
-        if not os.path.exists(TASKS_FILE):
-            return "修改失败：任务列表为空。"
-
-        try:
-            with open(TASKS_FILE, "r", encoding="utf-8") as f:
-                content = f.read().strip()
-                raw_tasks = json.loads(content) if content else []
-        except Exception as e:
-            return f"操作异常：{str(e)}"
-
-        tasks = _validated_tasks(raw_tasks)
-
-        found = False
-        for t in tasks:
-            if t.id == task_id:
-                if new_time:
-                    try:
-                        parsed_new_time = datetime.strptime(new_time, TASK_TIME_FORMAT)
-                    except ValueError:
-                        return "修改失败：时间格式错误。"
-                    now = datetime.now()
-                    if parsed_new_time <= now:
-                        return (
-                            "修改失败：new_time 必须晚于当前时间。"
-                            f" 当前时间：{now.strftime('%Y-%m-%d %H:%M:%S')}，"
-                            f" 你传入的是：{new_time}"
-                        )
-                    t.target_time = new_time
-                if new_description:
-                    t.description = new_description
-                found = True
-                break
-
-        if not found:
-            return f"修改失败：未找到 ID 为 {task_id} 的任务。"
-
-        try:
-            _write_tasks([t.model_dump() for t in tasks])
-        except Exception as e:
-            return f"操作异常：{str(e)}"
-
-        return f" 任务 [ID: {task_id}] 已成功更新。"
-
-
-BUILTIN_TOOLS = [
-    get_current_time,
-    calculator,
-    save_user_profile,
-    list_office_files,
-    read_office_file,
-    write_office_file,
-    execute_office_shell,
-    get_system_model_info,
-    schedule_task,
-    list_scheduled_tasks,
-    delete_scheduled_task,
-    modify_scheduled_task,
-    send_feishu_summary,
-    read_recent_emails,
-    submit_mailbox_desk_report
-]
+    return [
+        get_current_time,
+        calculator,
+        create_profile_tool(thread_id, workspace.memory_dir),
+        *build_office_tools(workspace.office_dir),
+        get_system_model_info,
+        *create_task_tools(workspace.tasks_file),
+        send_feishu_summary,
+        read_recent_emails,
+        create_desk_submit_tool(workspace.tasks_file),
+    ]

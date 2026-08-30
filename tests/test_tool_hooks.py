@@ -157,7 +157,7 @@ class TestDomainDeniedReceipt(unittest.TestCase):
     def test_denial_returns_verbatim_reply_and_receipt(self):
         """拒绝话术与审计回执逐字一致；工具体的后续逻辑不触达"""
         gated = wrap_tool(self._denied_tool(), thread_id="hook_test")
-        with patch("auditronclaw.core.approval.gate.audit_logger") as mock_logger:
+        with patch("auditronclaw.core.logger._audit_logger") as mock_logger:
             result = gated.invoke({"x": 1})
         self.assertEqual(result, (
             "❌ 读取失败：读取请求被拒绝——目标域名 'evil.example.com' 不在允许名单内，"
@@ -201,7 +201,7 @@ class TestAuditReceiptHook(unittest.TestCase):
         gated = wrap_tool(
             _calc_like(lambda x: Receipt("结果正文", "回执内容")),
             thread_id="hook_test", hooks=(AuditReceiptHook(),))
-        with patch("auditronclaw.core.approval.hooks.audit_logger") as mock_logger:
+        with patch("auditronclaw.core.logger._audit_logger") as mock_logger:
             result = gated.invoke({"x": 1})
         self.assertEqual(result, "结果正文")
         self.assertIs(type(result), str, "回执取出后还原为普通 str")
@@ -215,7 +215,7 @@ class TestAuditReceiptHook(unittest.TestCase):
         """普通返回零事件（回执是工具自愿搭载的，不是机制强加的）"""
         gated = wrap_tool(_calc_like(lambda x: f"plain{x}"), thread_id="hook_test",
                           hooks=(AuditReceiptHook(),))
-        with patch("auditronclaw.core.approval.hooks.audit_logger") as mock_logger:
+        with patch("auditronclaw.core.logger._audit_logger") as mock_logger:
             gated.invoke({"x": 1})
         mock_logger.log_event.assert_not_called()
 
@@ -226,7 +226,7 @@ class TestAuditReceiptHook(unittest.TestCase):
         result = raw.invoke({"x": 1})
         self.assertEqual(result, "正文")
         self.assertIn("正", result)
-        with patch("auditronclaw.core.approval.hooks.audit_logger") as mock_logger:
+        with patch("auditronclaw.core.logger._audit_logger") as mock_logger:
             raw.invoke({"x": 2})
         mock_logger.log_event.assert_not_called()
 
@@ -236,7 +236,7 @@ class TestAuditReceiptHook(unittest.TestCase):
         gated = wrap_tool(
             _calc_like(lambda x: Receipt("载回执", "回执内容") if x else "不载"),
             thread_id="hook_test", hooks=(AuditReceiptHook(),))
-        with patch("auditronclaw.core.approval.hooks.audit_logger") as mock_logger:
+        with patch("auditronclaw.core.logger._audit_logger") as mock_logger:
             first = gated.invoke({"x": 1})
             second = gated.invoke({"x": 0})
         self.assertEqual(first, "载回执")

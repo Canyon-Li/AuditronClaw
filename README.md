@@ -202,7 +202,7 @@ auditronclaw config
 **方式二：手动配置**
 
 ```bash
-cp .env.example .env   # 然后编辑 .env 填入提供商与 Key，效果等同向导
+cp .env.example .env   # 编辑 .env：填提供商与 Key，并把 AUDITRONCLAW_WORKSPACE 改成本仓库 workspace/ 的绝对路径
 ```
 
 ### 第 3 步 · 运行
@@ -260,6 +260,7 @@ python benchmarks/run_golden_eval.py
 - **openai / anthropic 直连超时**：在向导中填写代理 Base URL，或改用国内 OpenAI 兼容接口（阿里云 / 腾讯云 / z.ai）。
 - **基准跑一次开销多大**：99 条用例逐条真实调用模型，费用取决于所选模型，建议先用低价模型（如 glm-4-flash）跑通流程。
 - **`auditronclaw` 命令不存在 / venv 里没有 pip**：个别环境下建出的 venv 不带 pip，先 `.venv/Scripts/python -m ensurepip --upgrade` 再重跑 `pip install -e .`；或跳过注册，直接 `.venv/Scripts/python -m entry.cli run`，效果等同。
+- **`auditronclaw run` 启动即报 `AUDITRONCLAW_WORKSPACE` 缺失**：工作区根目录必须显式指定，程序不做默认猜测——审计与任务数据落错位置是事故，宁可启动失败。在 `.env` 写一行 `AUDITRONCLAW_WORKSPACE=<仓库绝对路径>/workspace` 即可（配置向导会自动写入，自定义落点不会被覆盖）。
 
 ---
 

@@ -199,7 +199,7 @@ class TestReadRecentEmailsSecurity(unittest.TestCase):
         """凭据纪律的落盘级验证：真实审计 jsonl 全文不含授权码（与 01 同级钉子）。
         03 票起回执由 wrapper 的 AuditReceiptHook 落盘——必须经门调用，
         回执才真实走一遍"工具 → hook → jsonl"全链，裸调用不写回执"""
-        from auditronclaw.core.logger import audit_logger
+        from auditronclaw.core.logger import get_audit_logger
 
         secret = f"AUTHCODE_{os.getpid()}XYZ"
         env = self._env_with_creds() | {"MAIL_IMAP_PASSWORD": secret}
@@ -211,8 +211,8 @@ class TestReadRecentEmailsSecurity(unittest.TestCase):
             mail_tool.set_provider(FakeMailProvider([], error=OSError(f"login failed with {secret}")))
             gated.invoke({"hours": 24, "max_emails": 10})
 
-        audit_logger.log_queue.join()
-        system_log = os.path.join(audit_logger.log_dir, "system.jsonl")
+        get_audit_logger().log_queue.join()
+        system_log = os.path.join(get_audit_logger().log_dir, "system.jsonl")
         self.assertTrue(os.path.exists(system_log), "system 级审计日志应存在")
         with open(system_log, encoding="utf-8") as f:
             full_text = f.read()
@@ -230,7 +230,7 @@ class TestReadRecentEmailsSecurity(unittest.TestCase):
                           rule_matcher=lambda *a, **k: {"id": "r1"})
         # 三个名单来源全空:默认/环境变量/运行时审批规则(审批门 05 票起规则也是名单源)
         with InjectedProvider(provider), patch.dict(os.environ, self._env_with_creds()), \
-                patch("auditronclaw.core.approval.gate.audit_logger") as mock_logger, \
+                patch("auditronclaw.core.logger._audit_logger") as mock_logger, \
                 patch.object(domain_gate, "DEFAULT_ALLOWED_DOMAINS", set()), \
                 patch.object(domain_gate, "_EXTENDED_DOMAINS", set()), \
                 patch.object(domain_gate, "load_approval_rule_domains", return_value=[]):
@@ -250,7 +250,7 @@ class TestReadRecentEmailsSecurity(unittest.TestCase):
         gated = wrap_tool(read_recent_emails, thread_id="gate_test",
                           rule_matcher=lambda *a, **k: {"id": "r1"})
         with InjectedProvider(provider), patch.dict(os.environ, self._env_with_creds()), \
-                patch("auditronclaw.core.approval.gate.audit_logger") as mock_logger, \
+                patch("auditronclaw.core.logger._audit_logger") as mock_logger, \
                 patch.object(domain_gate, "DEFAULT_ALLOWED_DOMAINS", set()), \
                 patch.object(domain_gate, "_EXTENDED_DOMAINS", set()), \
                 patch.object(domain_gate, "load_approval_rule_domains", return_value=[]):
@@ -280,7 +280,7 @@ class TestReadRecentEmailsSecurity(unittest.TestCase):
                           hooks=(AuditReceiptHook(),))
         with InjectedProvider(FakeMailProvider(mails)), \
                 patch.dict(os.environ, self._env_with_creds()), \
-                patch("auditronclaw.core.approval.hooks.audit_logger") as mock_logger:
+                patch("auditronclaw.core.logger._audit_logger") as mock_logger:
             result = gated.invoke({"hours": 24, "max_emails": 10})
         self.assertIn("共 2 封", result)
         self.assertIs(type(result), str, "回执取出后返回值为普通 str")
@@ -300,7 +300,7 @@ class TestReadRecentEmailsSecurity(unittest.TestCase):
                           hooks=(AuditReceiptHook(),))
         with InjectedProvider(FakeMailProvider([], error=ConnectionError("refused"))), \
                 patch.dict(os.environ, self._env_with_creds()), \
-                patch("auditronclaw.core.approval.hooks.audit_logger") as mock_logger:
+                patch("auditronclaw.core.logger._audit_logger") as mock_logger:
             result = gated.invoke({"hours": 24, "max_emails": 10})
         self.assertIn("失败", result)
         self.assertIn("ConnectionError", result)
@@ -346,8 +346,12 @@ class TestReadRecentEmailsToolShape(unittest.TestCase):
 
     def test_tool_registered_in_builtins(self):
         """工具注册进内置工具清单"""
-        from auditronclaw.core.tools.builtins import BUILTIN_TOOLS
-        names = {t.name for t in BUILTIN_TOOLS}
+        import tempfile
+        from auditronclaw.core.config import WorkspaceConfig
+        from auditronclaw.core.tools.builtins import build_builtin_tools
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = WorkspaceConfig.from_root(tmp)
+            names = {t.name for t in build_builtin_tools(workspace, "shape_probe")}
         self.assertIn("read_recent_emails", names)
 
     def test_docstring_documents_readonly_boundary(self):

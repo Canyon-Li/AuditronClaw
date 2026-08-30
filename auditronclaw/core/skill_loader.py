@@ -6,8 +6,7 @@ from pydantic import BaseModel, Field
 from langchain_core.tools import StructuredTool
 from functools import lru_cache
 
-from .config import SKILLS_DIR
-from .tools.sandbox_tools import execute_office_shell
+from .tools.sandbox_tools import run_office_command
 
 # 技能工具的 StructuredTool.metadata 键:装配点(审批门)据此判定该工具
 # 走"技能来源"分级路径。键名单一事实源,执行器与分级器共用。
@@ -44,7 +43,16 @@ class LazySkillLoader:
     4. LRU缓存策略，自动清理不常用的技能
     """
     
-    def __init__(self, cache_size: int = 50):
+    def __init__(self, skills_dir: str, office_dir: str, cache_size: int = 50):
+        """
+        Args:
+            skills_dir: 技能目录（office/skills），装配期入参
+            office_dir: office 工位根，mode=run 的命令在此执行（与
+                execute_office_shell 同一执行体、同一道边界）
+            cache_size: 内容缓存量
+        """
+        self._skills_dir = skills_dir
+        self._office_dir = office_dir
         self._skill_registry: Optional[List[Dict[str, Any]]] = None
         self._cache_size = cache_size
         self._last_scan_time = 0
@@ -85,13 +93,13 @@ class LazySkillLoader:
         
         skills = []
         
-        if not os.path.exists(SKILLS_DIR):
+        if not os.path.exists(self._skills_dir):
             self._skill_registry = []
             self._last_scan_time = current_time
             return []
-        
-        for item in os.listdir(SKILLS_DIR):
-            folder_path = os.path.join(SKILLS_DIR, item)
+
+        for item in os.listdir(self._skills_dir):
+            folder_path = os.path.join(self._skills_dir, item)
             if not os.path.isdir(folder_path):
                 continue
             
@@ -195,7 +203,7 @@ class LazySkillLoader:
                     return "错误：在 'run' 模式下，必须提供 command 参数！"
 
                 actual_cmd = expand_skill_command(command, skill_info["folder"])
-                return execute_office_shell.invoke({"command": actual_cmd})
+                return run_office_command(self._office_dir, actual_cmd)
             else:
                 return "错误：mode 参数只能是 'help' 或 'run'。"
         
@@ -244,49 +252,22 @@ class LazySkillLoader:
         print(f" [OK] 技能缓存已清除")
 
 
-# 全局懒加载器实例
-_lazy_loader = LazySkillLoader(cache_size=50)
-
-
-def load_dynamic_skills(force_rescan: bool = False) -> List[StructuredTool]:
+def load_dynamic_skills(skills_dir: str, office_dir: str,
+                        force_rescan: bool = False) -> List[StructuredTool]:
     """
-    加载动态技能（懒加载 + 缓存版本）
-    
+    装配动态技能（懒加载工具占位符）：目录为装配期入参（05 票）。
+
+    每次装配独立构造加载器——没有模块级落点，工作区路径由调用方
+    （入口/测试/基准）注入；技能命令的执行体与 execute_office_shell
+    同源（run_office_command），同一套白名单与回执格式。
+
     Args:
+        skills_dir: 技能目录（office/skills）
+        office_dir: office 工位根（mode=run 的执行目录）
         force_rescan: 是否强制重新扫描技能目录（默认 False）
-    
+
     Returns:
         工具对象列表（懒加载占位符）
-    
-    Note:
-        - 启动时只扫描元数据，不加载完整内容
-        - 首次调用技能时才加载完整内容
-        - 支持热更新（修改技能文件后自动重新加载）
-        - 使用 LRU 缓存策略
     """
-    return _lazy_loader.get_all_tools(force_rescan=force_rescan)
-
-
-def reload_skills() -> List[StructuredTool]:
-    """
-    强制重新扫描技能目录并清除缓存
-    
-    Returns:
-        更新后的工具列表
-    """
-    return _lazy_loader.get_all_tools(force_rescan=True)
-
-
-def get_skill_count() -> int:
-    """
-    获取当前技能数量（不触发加载）
-    
-    Returns:
-        技能总数
-    """
-    return _lazy_loader.get_tool_count()
-
-
-def clear_skill_cache():
-    """清除技能内容缓存"""
-    _lazy_loader.clear_cache()
+    return LazySkillLoader(skills_dir, office_dir).get_all_tools(
+        force_rescan=force_rescan)

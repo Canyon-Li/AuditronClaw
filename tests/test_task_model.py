@@ -28,7 +28,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from pydantic import ValidationError
 
-from auditronclaw.core.tools.builtins import ScheduledTask, _append_task, schedule_task
+from auditronclaw.core.tools.builtins import (
+    ScheduledTask,
+    _append_task,
+    create_task_tools,
+)
 
 # golden_cases.yaml（gold_task_003 setup）的条目字面量：old-shape 现成样本
 GOLDEN_OLD_SHAPE_ENTRY = {
@@ -99,32 +103,30 @@ class TestScheduledTaskModel(unittest.TestCase):
     def test_schedule_docstring_documents_all_repeat_values(self):
         """docstring 与模型同步：每个 Literal 值都在参数说明里
         （monthly 曾是"代码支持、文档缺失"）"""
+        schedule_tool = create_task_tools("unused_tasks.json")[0]
         for value in _repeat_values():
-            self.assertIn(value, schedule_task.description)
+            self.assertIn(value, schedule_tool.description)
 
 
 class TestAppendTaskModelBoundary(unittest.TestCase):
-    """_append_task：内部构造模型，落盘条目形状由 model_dump 决定。"""
+    """_append_task：内部构造模型，落盘条目形状由 model_dump 决定。
+    队列落点为装配入参（05 票）：直接传临时文件路径，不再 patch 模块常量。"""
 
     def setUp(self):
         fd, self.tasks_path = tempfile.mkstemp(suffix=".json")
         # Windows:写路径测试不得持有句柄,别挡 _write_tasks 的 os.replace
         os.close(fd)
         os.unlink(self.tasks_path)  # 从"文件不存在"开始:被拒路径断言条目不得落盘
-        import auditronclaw.core.tools.builtins as builtins_mod
-        self._builtins = builtins_mod
-        self._orig = builtins_mod.TASKS_FILE
-        builtins_mod.TASKS_FILE = self.tasks_path
 
     def tearDown(self):
-        self._builtins.TASKS_FILE = self._orig
         for p in (self.tasks_path, self.tasks_path + ".tmp"):
             if os.path.exists(p):
                 os.unlink(p)
 
     def test_appended_entry_has_declared_five_key_shape(self):
         """追加条目恰好 5 键、按声明序输出——形状只由模型一处声明"""
-        _append_task("2030-01-01 09:00:00", "模型边界任务", repeat="monthly")
+        _append_task(self.tasks_path, "2030-01-01 09:00:00",
+                     "模型边界任务", repeat="monthly")
 
         with open(self.tasks_path, encoding="utf-8") as f:
             (entry,) = json.load(f)
@@ -138,8 +140,9 @@ class TestAppendTaskModelBoundary(unittest.TestCase):
     def test_schedule_task_rejects_unknown_repeat_without_touching_file(self):
         """repeat="sometimes"：结构化拒绝,话术列出四个合法值,条目不落盘"""
         future = (datetime.now() + timedelta(hours=2)).strftime(TIME_FORMAT)
+        schedule_tool = create_task_tools(self.tasks_path)[0]
 
-        result = schedule_task.invoke({"target_time": future,
+        result = schedule_tool.invoke({"target_time": future,
                                        "description": "拼错循环值",
                                        "repeat": "sometimes"})
 
@@ -151,25 +154,14 @@ class TestAppendTaskModelBoundary(unittest.TestCase):
 
 
 class _PacemakerHarness(unittest.TestCase):
-    """三处 TASKS_FILE 引用钉进同一临时文件、真跑 pacemaker_loop 的公共底座。"""
+    """真跑 pacemaker_loop 的公共底座。队列落点为装配入参（05 票）：
+    起搏器与任务工具吃同一 tasks_file 参数，不再三处钉模块常量。"""
 
     def setUp(self):
-        import auditronclaw.core.config
-        import auditronclaw.core.heartbeat
-        import auditronclaw.core.tools.builtins
-
         fd, self.tasks_path = tempfile.mkstemp(suffix=".json")
         os.close(fd)  # Windows:立即关句柄,别挡写路径的 os.replace
-        self._modules = (auditronclaw.core.config,
-                         auditronclaw.core.heartbeat,
-                         auditronclaw.core.tools.builtins)
-        self._orig = [m.TASKS_FILE for m in self._modules]
-        for m in self._modules:
-            m.TASKS_FILE = self.tasks_path
 
     def tearDown(self):
-        for m, orig in zip(self._modules, self._orig):
-            m.TASKS_FILE = orig
         for p in (self.tasks_path, self.tasks_path + ".tmp"):
             if os.path.exists(p):
                 os.unlink(p)
@@ -190,7 +182,8 @@ class _PacemakerHarness(unittest.TestCase):
 
         async def drill():
             worker = asyncio.create_task(
-                pacemaker_loop(task_queue=queue, check_interval=interval))
+                pacemaker_loop(task_queue=queue, tasks_file=self.tasks_path,
+                               check_interval=interval))
             await asyncio.sleep(seconds)
             worker.cancel()
             try:
@@ -228,7 +221,7 @@ class TestHeartbeatValidationReceipt(_PacemakerHarness):
              "description": "合法未来任务", "repeat": None, "repeat_count": None},
         ])
 
-        with patch("auditronclaw.core.tools.builtins.audit_logger") as mock_logger:
+        with patch("auditronclaw.core.logger._audit_logger") as mock_logger:
             queue = self._run_pacemaker()
 
         # 永不触发：队列零消息（旧行为会先把提醒发给会话,再无声消失）
@@ -254,7 +247,7 @@ class TestHeartbeatValidationReceipt(_PacemakerHarness):
              "repeat_count": None},
         ])
 
-        with patch("auditronclaw.core.tools.builtins.audit_logger") as mock_logger:
+        with patch("auditronclaw.core.logger._audit_logger") as mock_logger:
             queue = self._run_pacemaker()
 
         self.assertEqual(len(self._drain(queue)), 0)
@@ -268,7 +261,7 @@ class TestHeartbeatValidationReceipt(_PacemakerHarness):
              "description": "坏时间任务", "repeat": None, "repeat_count": None},
         ])
 
-        with patch("auditronclaw.core.tools.builtins.audit_logger") as mock_logger:
+        with patch("auditronclaw.core.logger._audit_logger") as mock_logger:
             queue = self._run_pacemaker()
 
         self.assertEqual(len(self._drain(queue)), 0)

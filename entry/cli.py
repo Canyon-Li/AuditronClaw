@@ -5,7 +5,7 @@ import logging
 from rich.console import Console
 from rich.panel import Panel
 from rich.status import Status
-from dotenv import set_key, load_dotenv, unset_key
+from dotenv import set_key, load_dotenv, unset_key, dotenv_values
 import sys
 
 from auditronclaw.core.provider import get_provider
@@ -146,6 +146,12 @@ def config_wizard():
     
     set_key(ENV_PATH, "DEFAULT_PROVIDER", provider)
     set_key(ENV_PATH, "DEFAULT_MODEL", model_name)
+
+    # 工作区落点首写(05 票):from_env 无默认回退,向导替用户把检出位置写明;
+    # 已显式配置过的值不覆盖——运行者自定义的落点优先于向导默认
+    if "AUDITRONCLAW_WORKSPACE" not in dotenv_values(ENV_PATH):
+        set_key(ENV_PATH, "AUDITRONCLAW_WORKSPACE",
+                os.path.join(PROJECT_ROOT, "workspace"))
 
     console.print(Panel(
         f"配置已保存至 [#8d52ff]{ENV_PATH}[/#8d52ff]\n"

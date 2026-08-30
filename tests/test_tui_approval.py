@@ -393,7 +393,7 @@ def _store(*entries):
     """临时位规则存取,预铸条目 [(action, scope, source)](铸规则留痕 patch 掉)。"""
     store = RuleStore(path=os.path.join(tempfile.mkdtemp(prefix="tui04_store_"),
                                         "approval_rules.json"))
-    with patch('auditronclaw.core.approval.gate.audit_logger'):
+    with patch('auditronclaw.core.logger._audit_logger'):
         for action, scope, source in entries:
             store.persist_rule(action=action, scope=scope, source=source)
     return store
@@ -404,7 +404,7 @@ class TestOperatorCommands(unittest.TestCase):
 
     def _run_command(self, text, store):
         calls = []
-        with patch('auditronclaw.core.approval.gate.audit_logger'), \
+        with patch('auditronclaw.core.logger._audit_logger'), \
              patch.object(tui_main, 'cprint', side_effect=lambda *a, **k: calls.append(a)):
             consumed = tui_main.handle_operator_command(text, store)
         return consumed, calls
@@ -431,7 +431,7 @@ class TestOperatorCommands(unittest.TestCase):
         rules = store.list_rules()
         self.assertEqual(len(rules), 1)
         prefix = rules[0].id[:6]
-        with patch('auditronclaw.core.approval.gate.audit_logger'):
+        with patch('auditronclaw.core.logger._audit_logger'):
             consumed, calls = self._run_command(f"/revoke {prefix}", store)
         self.assertTrue(consumed)
         self.assertEqual(store.list_rules(), [], "撤销即失效(下次匹配读不到)")
@@ -549,21 +549,22 @@ def _call(call_id: str, tool: str, args: dict) -> AIMessage:
 
 
 def _build_app(stack: ExitStack, script, tools):
-    """按现有缝构造 agent app;规则文件钉到临时位,返回该路径。"""
+    """按现有缝构造 agent app;规则文件钉到临时工作区,返回 (app, 工作区)。"""
     from auditronclaw.core.agent import create_agent_app
-    rules_path = os.path.join(tempfile.mkdtemp(prefix="tui04_app_"),
-                              "approval_rules.json")
-    stack.enter_context(patch(
-        'auditronclaw.core.approval.rules.APPROVAL_RULES_FILE', rules_path))
+    from auditronclaw.core.config import WorkspaceConfig
+    workspace = WorkspaceConfig.from_root(tempfile.mkdtemp(prefix="tui04_ws_"))
+    workspace.ensure_dirs()
     stack.enter_context(patch('auditronclaw.core.agent.get_provider',
                               return_value=ScriptedLLM(script)))
-    stack.enter_context(patch('auditronclaw.core.agent.BUILTIN_TOOLS', tools))
+    stack.enter_context(patch('auditronclaw.core.agent.build_builtin_tools',
+                              return_value=tools))
     stack.enter_context(patch('auditronclaw.core.agent.load_dynamic_skills',
                               return_value=[]))
-    stack.enter_context(patch('auditronclaw.core.approval.gate.audit_logger'))
+    stack.enter_context(patch('auditronclaw.core.logger._audit_logger'))
     app = create_agent_app(provider_name="fake", model_name="fake-model",
+                           workspace=workspace,
                            checkpointer=MemorySaver(), thread_id="tui04")
-    return app, rules_path
+    return app, workspace.approval_rules_file
 
 
 async def _collect(agen, events):

@@ -24,8 +24,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Optional
 
-from ..config import APPROVAL_RULES_FILE
-from ..logger import audit_logger
+from ..logger import get_audit_logger
 from .classifier import (
     RISK_DELETE,
     RISK_DOMAIN_EXTEND,
@@ -160,9 +159,9 @@ class RuleStore:
     (单操作员低频调用,文件极小,读取代价可忽略)。
     """
 
-    def __init__(self, path: Optional[str] = None):
-        # 默认路径在构造时取一次(config 常量;测试 patch rules 模块属性即可改道)
-        self.path = APPROVAL_RULES_FILE if path is None else path
+    def __init__(self, path: str):
+        # 落点为装配期入参(05 票):入口从 WorkspaceConfig 注入,本模块不持路径常量
+        self.path = path
 
     # ---------- 读 ----------
 
@@ -174,7 +173,7 @@ class RuleStore:
         except FileNotFoundError:
             return []
         except (OSError, ValueError, UnicodeDecodeError) as e:
-            audit_logger.log_event(
+            get_audit_logger().log_event(
                 thread_id="system", event="system_action",
                 content=f"审批规则文件不可读,按空规则集处理(fail-closed): {e}")
             return []

@@ -7,7 +7,7 @@
   over_refusal 度量"门不挡合法流",不度量审批摩擦
 
 分层(沿用仓库测试纪律):
-- 子进程级:规则文件路径随每用例 workspace 重载(reload 链补 approval.rules)
+- 夹具落点:规则文件随每用例临时 workspace(装配期注入,05 票)
 - 纯函数/夹具:生产同款规则集守恒(= 冷启动清单)、预置落盘形状、作用域边界
 - 假 LLM 驱动管线测试:无人档规则命中静默放行/未命中拒绝并继续;有人档
   未匹配自动批准(决定留痕、不铸规则)
@@ -15,7 +15,6 @@
 import asyncio
 import json
 import os
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -31,6 +30,7 @@ from langchain_core.tools import StructuredTool
 from langgraph.checkpoint.memory import MemorySaver
 
 from auditronclaw.core.approval.gate import REJECT_PHRASE
+from auditronclaw.core.config import WorkspaceConfig
 import bench_pipeline
 
 BENCHMARKS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'benchmarks'))
@@ -62,21 +62,21 @@ def _tool_call(call_id: str, tool: str, args: dict) -> AIMessage:
         {"name": tool, "args": args, "id": call_id, "type": "tool_call"}])
 
 
-def _enter_drive_patches(stack: ExitStack, llm, tools) -> str:
-    """驱动管线测试的 patch 栈,返回本用例规则文件路径(预置规则写到这里)。
+def _enter_drive_patches(stack: ExitStack, llm, tools):
+    """驱动管线测试的 patch 栈,返回 (工作区, 规则文件路径)。
 
-    与真实 runner 同构:get_provider/BUILTIN_TOOLS/load_dynamic_skills 打在
-    agent 消费命名空间,规则路径钉临时位,审批审计截获在门。"""
-    rules_path = os.path.join(tempfile.mkdtemp(prefix="fixture_rules_"),
-                              "approval_rules.json")
-    stack.enter_context(patch(
-        'auditronclaw.core.approval.rules.APPROVAL_RULES_FILE', rules_path))
+    与真实 runner 同构:get_provider/build_builtin_tools/load_dynamic_skills
+    打在 agent 消费命名空间;规则文件落点随装配工作区注入(05 票)——
+    预置规则与门的 matcher 同文件。"""
+    workspace = WorkspaceConfig.from_root(tempfile.mkdtemp(prefix="fixture_ws_"))
+    workspace.ensure_dirs()
     stack.enter_context(patch('auditronclaw.core.agent.get_provider',
                               return_value=llm))
-    stack.enter_context(patch('auditronclaw.core.agent.BUILTIN_TOOLS', tools))
+    stack.enter_context(patch('auditronclaw.core.agent.build_builtin_tools',
+                              return_value=tools))
     stack.enter_context(patch('auditronclaw.core.agent.load_dynamic_skills',
                               return_value=[]))
-    return rules_path
+    return workspace, workspace.approval_rules_file
 
 
 class _AuditSpy:
@@ -93,42 +93,44 @@ def _decisions(spy: _AuditSpy) -> list:
     return [e for e in spy.events if e.get("event") == "approval_decision"]
 
 
-# ============ reload 链:规则路径随每用例 workspace ============
+# ============ 夹具落点:规则文件随每用例临时 workspace ============
 
 class TestRulesPathFollowsWorkspace(unittest.TestCase):
-    """approval.rules 必须在基准 reload 链上:规则文件随每用例临时 workspace。
+    """规则落点随每用例 workspace(05 票 reload 链删除后的参数注入形态)。
 
-    此前 rules 不在链上(其首次导入发生在首个 reload 内、cfg 重载之前),
-    APPROVAL_RULES_FILE 从此锚死在仓库 workspace——夹具规则写进临时
-    workspace 而门读的是操作员本地的规则文件,本地状态会串进基准数字。
-    子进程级验证,与真实 runner 同序(先例:test_bench_pipeline 审计锚定)。
+    此前靠 reload 链把 approval.rules 重载到临时 workspace,漏 reload 即
+    锚死在仓库 workspace——夹具规则写进临时目录而门读的是操作员本地的
+    规则文件,本地状态会串进基准数字。链删除后落点由 run_case 构造的
+    WorkspaceConfig 显式传入:夹具规则写进用例临时根,操作员本地规则
+    文件不被触碰。
     """
 
-    def test_rules_module_rebinds_path_per_reload(self):
-        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        script = (
-            "import sys, os, tempfile\n"
-            f"sys.path.insert(0, {BENCHMARKS_DIR!r})\n"
-            "import bench_pipeline\n"
-            "from bench_pipeline import reload_with_workspace\n"
-            "from auditronclaw.core.approval import rules\n"
-            "for _ in range(2):\n"
-            "    tmp = tempfile.mkdtemp(prefix='rules_chain_')\n"
-            "    reload_with_workspace(tmp)\n"
-            "    print(os.path.join(tmp, 'approval_rules.json'))\n"
-            "    print(rules.APPROVAL_RULES_FILE)\n"
-        )
-        env = {k: v for k, v in os.environ.items() if k != "AUDITRONCLAW_WORKSPACE"}
-        out = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True, text=True, cwd=repo_root, env=env, check=True,
-        )
-        lines = [l for l in out.stdout.splitlines() if l and not l.startswith("🔧")]
-        self.assertEqual(len(lines), 4, f"应输出两对路径,实得: {lines}")
-        expected_1, actual_1, expected_2, actual_2 = lines
-        self.assertEqual(actual_1, expected_1)
-        self.assertEqual(actual_2, expected_2)
-        self.assertNotEqual(actual_1, actual_2, "两次 reload 的路径必须不同")
+    def test_rules_file_lands_in_case_workspace(self):
+        """预置规则的落点就是本用例工作区的 approval_rules.json"""
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = WorkspaceConfig.from_root(tmp)
+            bench_pipeline.preset_production_rules(workspace)
+            rules_path = os.path.join(tmp, "approval_rules.json")
+            self.assertEqual(workspace.approval_rules_file, rules_path,
+                             "落点由工作区派生,不是模块常量")
+            with open(rules_path, encoding="utf-8") as f:
+                entries = json.load(f)
+        self.assertEqual({(e["action"], e["scope"]) for e in entries},
+                         PRODUCTION_RULES, "夹具规则确实写进了用例工作区")
+
+    def test_sequential_cases_get_isolated_rule_files(self):
+        """连续两用例各自预置:文件互不串扰(每用例独立工作区)"""
+        landed = []
+        for _ in range(2):
+            with tempfile.TemporaryDirectory() as tmp:
+                workspace = WorkspaceConfig.from_root(tmp)
+                bench_pipeline.preset_production_rules(workspace)
+                with open(workspace.approval_rules_file, encoding="utf-8") as f:
+                    entries = json.load(f)
+                self.assertEqual(len(entries), len(PRODUCTION_RULES),
+                                 "上一用例的规则不得串进本用例(每用例恰好三条)")
+                landed.append(workspace.approval_rules_file)
+        self.assertNotEqual(landed[0], landed[1], "两用例规则文件必须不同落点")
 
 
 # ============ 夹具:生产同款规则集 ============
@@ -143,12 +145,10 @@ class TestProductionRuleFixture(unittest.TestCase):
 
     def test_preset_writes_bench_fixture_entries(self):
         """预置落盘:三条 source=bench_fixture,字段形状与生产铸出一致"""
-        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
-            rules_path = os.path.join(tmp, "approval_rules.json")
-            stack.enter_context(patch(
-                'auditronclaw.core.approval.rules.APPROVAL_RULES_FILE', rules_path))
-            bench_pipeline.preset_production_rules()
-            with open(rules_path, encoding="utf-8") as f:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = WorkspaceConfig.from_root(tmp)
+            bench_pipeline.preset_production_rules(workspace)
+            with open(workspace.approval_rules_file, encoding="utf-8") as f:
                 entries = json.load(f)
         self.assertEqual({(e["action"], e["scope"]) for e in entries},
                          PRODUCTION_RULES)
@@ -158,13 +158,11 @@ class TestProductionRuleFixture(unittest.TestCase):
 
     def test_preset_is_idempotent(self):
         """幂等:重复预置不翻倍(persist_rule 同动作同作用域幂等的夹具侧契约)"""
-        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
-            rules_path = os.path.join(tmp, "approval_rules.json")
-            stack.enter_context(patch(
-                'auditronclaw.core.approval.rules.APPROVAL_RULES_FILE', rules_path))
-            bench_pipeline.preset_production_rules()
-            bench_pipeline.preset_production_rules()
-            with open(rules_path, encoding="utf-8") as f:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = WorkspaceConfig.from_root(tmp)
+            bench_pipeline.preset_production_rules(workspace)
+            bench_pipeline.preset_production_rules(workspace)
+            with open(workspace.approval_rules_file, encoding="utf-8") as f:
                 entries = json.load(f)
         self.assertEqual(len(entries), len(PRODUCTION_RULES))
 
@@ -218,15 +216,14 @@ class TestInjectionFormUnattended(unittest.TestCase):
         ]
         spy = _AuditSpy()
         case = {"id": "form_probe", "surface": "probe", "trigger": "处理事务"}
-        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
-            rules_path = _enter_drive_patches(stack, ScriptedLLM(script), tools)
+        with ExitStack() as stack:
+            workspace, rules_path = _enter_drive_patches(stack, ScriptedLLM(script),
+                                                         tools)
             stack.enter_context(patch(
-                'auditronclaw.core.approval.gate.audit_logger', spy))
-            with patch('auditronclaw.core.approval.rules.APPROVAL_RULES_FILE',
-                       rules_path):
-                bench_pipeline.preset_production_rules()
+                'auditronclaw.core.logger._audit_logger', spy))
+            bench_pipeline.preset_production_rules(workspace)
             raw = asyncio.run(bench_pipeline._drive_agent(
-                case, tmp, "fake-model", "fake", "unattended_probe", []))
+                case, workspace, "fake-model", "fake", "unattended_probe", []))
 
         # 命中的执行了,未命中的一分未动(harm 不落地)
         self.assertEqual(executed, ["喝水的提醒"])
@@ -266,15 +263,14 @@ class TestGoldenFormAttended(unittest.TestCase):
         ]
         spy = _AuditSpy()
         case = {"id": "form_probe", "surface": "probe", "trigger": "写份报告"}
-        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
-            rules_path = _enter_drive_patches(stack, ScriptedLLM(script), tools)
+        with ExitStack() as stack:
+            workspace, rules_path = _enter_drive_patches(stack, ScriptedLLM(script),
+                                                         tools)
             stack.enter_context(patch(
-                'auditronclaw.core.approval.gate.audit_logger', spy))
-            with patch('auditronclaw.core.approval.rules.APPROVAL_RULES_FILE',
-                       rules_path):
-                bench_pipeline.preset_production_rules()
+                'auditronclaw.core.logger._audit_logger', spy))
+            bench_pipeline.preset_production_rules(workspace)
             raw = asyncio.run(bench_pipeline._drive_agent(
-                case, tmp, "fake-model", "fake", "attended_probe", [],
+                case, workspace, "fake-model", "fake", "attended_probe", [],
                 attended=True))
             with open(rules_path, encoding="utf-8") as f:
                 entries = json.load(f)

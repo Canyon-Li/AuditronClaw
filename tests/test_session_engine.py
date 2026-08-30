@@ -97,7 +97,7 @@ SCRIPT = [
 def _enter_fake_tool_patches(stack, llm):
     """现有缝三件套 + 审批门入册:假 LLM + 假工具表 + 空技能表 + 假工具入副作用册。
 
-    两侧(引擎/基准)都走 BUILTIN_TOOLS 缝而非 tools= 直给——_drive_agent
+    两侧(引擎/基准)都走内置工具工厂缝而非 tools= 直给——_drive_agent
     内部自建 app 只吃这条路径,两侧必须同构工具表,等价性才成立。
     假探针工具按"新工具入册即加映射"纪律注册为纯读——本文件测的是解析
     等价性,不是审批门(门的行为由 tests/test_approval_gate.py 把守)。
@@ -105,7 +105,7 @@ def _enter_fake_tool_patches(stack, llm):
     from auditronclaw.core.approval import classifier
     for p in (
         patch('auditronclaw.core.agent.get_provider', return_value=llm),
-        patch('auditronclaw.core.agent.BUILTIN_TOOLS', FAKE_TOOLS),
+        patch('auditronclaw.core.agent.build_builtin_tools', return_value=FAKE_TOOLS),
         patch('auditronclaw.core.agent.load_dynamic_skills', return_value=[]),
         patch.object(classifier, "_PURE_READ_TOOLS",
                      classifier._PURE_READ_TOOLS | {"fake_probe", "fake_check"}),
@@ -120,10 +120,14 @@ def _build_app(llm, stack):
     调用时(而非 app 构造时),构造完就撤 patch 会让假工具在门处被判未入册。
     """
     from auditronclaw.core.agent import create_agent_app
+    from auditronclaw.core.config import WorkspaceConfig
     _enter_fake_tool_patches(stack, llm)
+    workspace = WorkspaceConfig.from_root(tempfile.mkdtemp(prefix="session_engine_ws_"))
+    workspace.ensure_dirs()
     return create_agent_app(
         provider_name="fake",
         model_name="fake-model",
+        workspace=workspace,
         checkpointer=MemorySaver(),
         thread_id="session_engine_test",
     )
@@ -152,8 +156,11 @@ class TestTrajectoryEquivalence(unittest.TestCase):
         case = {"id": "engine", "surface": "equiv", "trigger": TRIGGER}
         with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
             _enter_fake_tool_patches(stack, ScriptedLLM(SCRIPT))
+            from auditronclaw.core.config import WorkspaceConfig
+            workspace = WorkspaceConfig.from_root(tmp)
+            workspace.ensure_dirs()
             raw = asyncio.run(bench_pipeline._drive_agent(
-                case, tmp, "fake-model", "fake", "equiv", []))
+                case, workspace, "fake-model", "fake", "equiv", []))
 
         self.assertEqual(traj.tool_calls, raw["tool_calls"], "tool_calls 逐字段等价")
         self.assertEqual(traj.tool_results, raw["tool_results"], "tool_results 逐字段等价")

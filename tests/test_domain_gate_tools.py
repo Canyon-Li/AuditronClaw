@@ -31,7 +31,7 @@ class TestDomainGatePureFunction(unittest.TestCase):
 
     def test_env_extension_allowed(self):
         """环境变量扩展生效：AUDITRONCLAW_ALLOWED_DOMAINS 追加的域名放行"""
-        with patch("auditronclaw.core.tools.domain_gate.audit_logger"):
+        with patch("auditronclaw.core.logger._audit_logger"):
             with patch.dict(os.environ, {"AUDITRONCLAW_ALLOWED_DOMAINS": "api.github.com,example.org"}):
                 domain_gate.refresh_extended_domains()
                 self.assertTrue(check_domain_allowed("api.github.com"))
@@ -42,7 +42,7 @@ class TestDomainGatePureFunction(unittest.TestCase):
 
     def test_env_missing_falls_back_to_default(self):
         """扩展缺失回退默认名单"""
-        with patch("auditronclaw.core.tools.domain_gate.audit_logger"):
+        with patch("auditronclaw.core.logger._audit_logger"):
             with patch.dict(os.environ, {}, clear=False):
                 os.environ.pop("AUDITRONCLAW_ALLOWED_DOMAINS", None)
                 domain_gate.refresh_extended_domains()
@@ -54,7 +54,7 @@ class TestDomainGateAudit(unittest.TestCase):
 
     def test_env_extension_logged(self):
         """扩展生效记审计：消息形态与命令白名单扩展一致"""
-        with patch("auditronclaw.core.tools.domain_gate.audit_logger") as mock_logger:
+        with patch("auditronclaw.core.logger._audit_logger") as mock_logger:
             with patch.dict(os.environ, {"AUDITRONCLAW_ALLOWED_DOMAINS": "api.github.com"}):
                 extended = domain_gate.load_extended_domains()
                 self.assertEqual(extended, {"api.github.com"})
@@ -66,7 +66,7 @@ class TestDomainGateAudit(unittest.TestCase):
 
     def test_denied_domain_logs_audit_event(self):
         """名单外域名拒绝时落审计事件：thread_id=system 级，含被拒域名与工具名"""
-        with patch("auditronclaw.core.tools.feishu_tool.audit_logger") as mock_logger:
+        with patch("auditronclaw.core.logger._audit_logger") as mock_logger:
             with patch("auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url",
                        return_value="https://open.feishu.cn/open-apis/bot/v2/hook/SECRET_TOKEN"):
                 # 把飞书域从名单里挤出去：默认/环境变量/运行时审批规则三个
@@ -145,7 +145,7 @@ class TestSendFeishuSummary(unittest.TestCase):
         """凭据纪律：参数、返回值、审计日志全文不含 webhook URL 串"""
         secret = "https://open.feishu.cn/open-apis/bot/v2/hook/SECRET_TOKEN"
         with InjectedSender(FakeSender()), patch(
-            "auditronclaw.core.tools.feishu_tool.audit_logger"
+            "auditronclaw.core.logger._audit_logger"
         ) as mock_logger:
             with patch("auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url",
                        return_value=secret):
@@ -179,8 +179,12 @@ class TestSendFeishuSummaryToolShape(unittest.TestCase):
 
     def test_tool_registered_in_builtins(self):
         """工具注册进内置工具清单"""
-        from auditronclaw.core.tools.builtins import BUILTIN_TOOLS
-        names = {t.name for t in BUILTIN_TOOLS}
+        import tempfile
+        from auditronclaw.core.config import WorkspaceConfig
+        from auditronclaw.core.tools.builtins import build_builtin_tools
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = WorkspaceConfig.from_root(tmp)
+            names = {t.name for t in build_builtin_tools(workspace, "shape_probe")}
         self.assertIn("send_feishu_summary", names)
 
     def test_docstring_documents_boundary(self):
@@ -201,7 +205,7 @@ class TestCredentialNeverReachesAuditFile(unittest.TestCase):
 
     def test_audit_file_clean_after_tool_run(self):
         import uuid
-        from auditronclaw.core.logger import audit_logger
+        from auditronclaw.core.logger import get_audit_logger
 
         secret = f"https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN_{uuid.uuid4().hex[:12]}"
 
@@ -215,8 +219,8 @@ class TestCredentialNeverReachesAuditFile(unittest.TestCase):
             send_feishu_summary.invoke({"summary_text": "日报内容"})
 
         # 等异步队列 flush 到 jsonl，再扫 system 级日志全文
-        audit_logger.log_queue.join()
-        system_log = os.path.join(audit_logger.log_dir, "system.jsonl")
+        get_audit_logger().log_queue.join()
+        system_log = os.path.join(get_audit_logger().log_dir, "system.jsonl")
         self.assertTrue(os.path.exists(system_log), "system 级审计日志应存在")
         with open(system_log, encoding="utf-8") as f:
             full_text = f.read()

@@ -1,8 +1,10 @@
-"""审计加固三行为:日志目录锚定、写失败兜底、启动自检。
+"""审计加固行为:落点装配期锚定、写失败兜底、启动自检、工厂语义。
 
 只测外部行为(文件落在哪、文件里有什么、构造是否抛异常),不测线程
-结构与队列内部。单例重置是测试手法:换一个全新 logger 跑用例,退出时
-恢复原单例,不污染其他测试。
+结构与队列内部。审计 logger 是装配期对象(05 票):入口 init_audit_logger
+构造一次,测试直接构造实例(不 shutdown 写线程——杀掉后它注册的 atexit
+再 join 会永久挂起,泄漏的守护线程由各自的 atexit 处理器在进程退出时
+正常收尾,先例:test_domain_gate_tools)。
 """
 import importlib
 import io
@@ -16,28 +18,13 @@ from contextlib import redirect_stdout
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from auditronclaw.core.logger import JSONLEventLogger
+from auditronclaw.core import logger as logger_module
 
 
-class SingletonResetTestCase(unittest.TestCase):
-    """测试期间换新单例,收尾恢复。
-
-    测试实例的写线程不 shutdown——杀掉后它注册的 atexit 再 join 会
-    永久挂起(test_domain_gate_tools 有先例注释);泄漏的守护线程由
-    各自的 atexit 处理器在进程退出时正常收尾。
-    """
-
-    def setUp(self):
-        self._saved_instance = JSONLEventLogger._instance
-        JSONLEventLogger._instance = None
-
-    def tearDown(self):
-        JSONLEventLogger._instance = self._saved_instance
-
-
-class TestLogDirAnchoring(SingletonResetTestCase):
+class TestLogDirAnchoring(unittest.TestCase):
 
     def test_log_dir_anchored_to_workspace_regardless_of_cwd(self):
-        """锚定:cwd 切到任意目录再初始化,日志仍落 WORKSPACE_DIR/logs"""
+        """锚定:cwd 切到任意目录,审计仍落装配给定的工作区 logs/"""
         with tempfile.TemporaryDirectory() as workspace, \
                 tempfile.TemporaryDirectory() as elsewhere:
             old_env = os.environ.get("AUDITRONCLAW_WORKSPACE")
@@ -47,8 +34,9 @@ class TestLogDirAnchoring(SingletonResetTestCase):
             importlib.reload(config_module)
             try:
                 os.chdir(elsewhere)
-                # 不传 log_dir:默认位置必须出自 config.LOG_DIR,而非 cwd 相对路径
-                logger = JSONLEventLogger()
+                # 落点出自装配期配置(WorkspaceConfig.log_dir),而非 cwd 相对路径
+                logger = JSONLEventLogger(log_dir=config_module.WorkspaceConfig
+                                          .from_env().log_dir)
                 marker = "anchoring-probe-8f2c"
                 logger.log_event("system", "audit_hardening_test", marker=marker)
                 logger.log_queue.join()
@@ -69,7 +57,7 @@ class TestLogDirAnchoring(SingletonResetTestCase):
                 importlib.reload(config_module)
 
 
-class TestWriteFailureFallback(SingletonResetTestCase):
+class TestWriteFailureFallback(unittest.TestCase):
 
     def test_main_write_failure_lands_in_fallback_file(self):
         """主写失败:事件落同目录 audit_fallback.jsonl,同格式 JSONL 且附失败缘由"""
@@ -119,19 +107,18 @@ class TestWriteFailureFallback(SingletonResetTestCase):
             self.assertTrue(logger.worker_thread.is_alive(), "写线程不得因写失败死亡")
 
 
-class TestStartupSelfCheck(SingletonResetTestCase):
+class TestStartupSelfCheck(unittest.TestCase):
 
     def test_refuses_to_start_when_log_dir_is_a_file(self):
-        """LOG_DIR 路径被普通文件占住:构造即抛,拒绝启动;失败不留半初始化单例"""
+        """LOG_DIR 路径被普通文件占住:构造即抛,拒绝启动"""
         with tempfile.TemporaryDirectory() as tmp:
             blocker = os.path.join(tmp, "logs")
             with open(blocker, "w", encoding="utf-8") as f:
                 f.write("not a directory")
-            with self.assertRaises(RuntimeError):
-                JSONLEventLogger(log_dir=blocker)
-            # 第二次构造仍拒绝——失败不得留下半初始化单例供后续调用取用
-            with self.assertRaises(RuntimeError):
-                JSONLEventLogger(log_dir=blocker)
+            # 第二次构造仍拒绝——每次构造都重新自检
+            for _ in range(2):
+                with self.assertRaises(RuntimeError):
+                    JSONLEventLogger(log_dir=blocker)
 
     def test_refuses_to_start_when_probe_fails(self):
         """探针文件路径被目录占住:探针写读失败,构造即抛"""
@@ -140,6 +127,51 @@ class TestStartupSelfCheck(SingletonResetTestCase):
             os.makedirs(os.path.join(log_dir, f".startup_probe.{os.getpid()}"))
             with self.assertRaises(RuntimeError):
                 JSONLEventLogger(log_dir=log_dir)
+
+
+class TestFactorySemantics(unittest.TestCase):
+    """装配期工厂语义:初始化一次、幂等、换址拒绝、未初始化取用即拒。"""
+
+    def setUp(self):
+        # 测试手法:换掉进程实例,退出恢复(conftest 的会话锚不受污染)
+        self._saved = logger_module._audit_logger
+        logger_module._audit_logger = None
+
+    def tearDown(self):
+        logger_module._audit_logger = self._saved
+
+    def test_get_before_init_refuses(self):
+        """未初始化即取用:拒绝——无审计不运行"""
+        with self.assertRaises(RuntimeError):
+            logger_module.get_audit_logger()
+
+    def test_init_is_idempotent_for_same_dir(self):
+        """同落点重复初始化:返回既有实例,不重建、不换线程"""
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = os.path.join(tmp, "logs")
+            first = logger_module.init_audit_logger(log_dir)
+            second = logger_module.init_audit_logger(log_dir)
+            self.assertIs(first, second)
+            self.assertIs(logger_module.get_audit_logger(), first)
+
+    def test_init_refuses_to_move_anchor(self):
+        """换落点初始化:拒绝——审计位置装配后固化,静默换址即凭证失联"""
+        with tempfile.TemporaryDirectory() as tmp1, tempfile.TemporaryDirectory() as tmp2:
+            logger_module.init_audit_logger(os.path.join(tmp1, "logs"))
+            with self.assertRaises(RuntimeError):
+                logger_module.init_audit_logger(os.path.join(tmp2, "logs"))
+
+    def test_failed_init_leaves_no_instance(self):
+        """构造失败不留半初始化实例:下次初始化重新走自检"""
+        with tempfile.TemporaryDirectory() as tmp:
+            blocker = os.path.join(tmp, "logs")
+            with open(blocker, "w", encoding="utf-8") as f:
+                f.write("not a directory")
+            with self.assertRaises(RuntimeError):
+                logger_module.init_audit_logger(blocker)
+            self.assertIsNone(logger_module._audit_logger)
+            good = logger_module.init_audit_logger(os.path.join(tmp, "logs_ok"))
+            self.assertIs(logger_module.get_audit_logger(), good)
 
 
 if __name__ == '__main__':

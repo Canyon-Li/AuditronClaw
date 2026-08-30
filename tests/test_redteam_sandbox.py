@@ -7,11 +7,13 @@ TDD 流程:本文件先在旧正则黑名单实现上运行——真绕过组必
 """
 import unittest
 import os
+import shutil
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from auditronclaw.core.tools.sandbox_tools import execute_office_shell
+from auditronclaw.core.tools.sandbox_tools import build_office_tools
 
 
 # 真绕过组:字符级正则看不见 shell 展开后的真实路径,旧实现预期放行(红)
@@ -62,10 +64,21 @@ VALID_CASES = [
 
 
 class TestSandboxShellRedTeam(unittest.TestCase):
-    """execute_office_shell 红队测试:注入拒绝 + 合法边界"""
+    """execute_office_shell 红队测试:注入拒绝 + 合法边界(临时工位装配)"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.office_dir = tempfile.mkdtemp(prefix="redteam_sandbox_test_")
+        cls.execute_office_shell = next(
+            t for t in build_office_tools(cls.office_dir)
+            if t.name == "execute_office_shell")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.office_dir, ignore_errors=True)
 
     def _assert_rejected(self, command):
-        result = execute_office_shell.invoke({"command": command})
+        result = self.execute_office_shell.invoke({"command": command})
         self.assertIn(
             "权限拒绝", result,
             f"注入向量未被拒绝: {command!r} -> {result!r}"
@@ -93,7 +106,7 @@ class TestSandboxShellRedTeam(unittest.TestCase):
         """合法边界:office 内日常命令与复合命令不误杀"""
         for command in VALID_CASES:
             with self.subTest(cmd=command):
-                result = execute_office_shell.invoke({"command": command})
+                result = self.execute_office_shell.invoke({"command": command})
                 self.assertNotIn(
                     "权限拒绝", result,
                     f"合法命令被误杀: {command!r} -> {result!r}"

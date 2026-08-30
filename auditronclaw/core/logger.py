@@ -1,3 +1,10 @@
+"""审计日志:内存队列 + 守护线程写 JSONL。
+
+装配期工厂(05 票):入口 init_audit_logger(log_dir) 构造一次、显式注入
+落点;消费方 get_audit_logger() 取用,未初始化即拒绝——无审计不运行。
+单例性由模块持有(_audit_logger),类本身是普通构造器:log_dir 必填,
+构造即启动自检,审计位置不随启动目录漂移、不在 import 期冻结。
+"""
 import os
 import json
 import threading
@@ -5,36 +12,20 @@ import queue
 import atexit
 from datetime import datetime, timezone
 
-from . import config
-
 FALLBACK_FILE = "audit_fallback.jsonl"
 _PROBE_FILE = ".startup_probe"
 
-# 内存队列 + 守护线程
+# 进程级实例与初始化锁:init 幂等、get 快路径无锁读
+_audit_logger: "JSONLEventLogger | None" = None
+_init_lock = threading.Lock()
+
+
 class JSONLEventLogger:
-    # 单例模式
-    _instance = None
-    _lock = threading.Lock()
+    """审计写盘器:无界内存队列缓冲,后台线程写,主写失败落同目录兜底文件。"""
 
-    def __new__(cls, log_dir: str | None = None):
-        with cls._lock:
-            if cls._instance is None:
-                instance = super().__new__(cls)
-                try:
-                    instance._init_logger(log_dir)
-                except Exception:
-                    # 自检失败不留半初始化单例：下次构造重新走自检，
-                    # 而不是拿一个写不了审计的假实例
-                    cls._instance = None
-                    raise
-                cls._instance = instance
-            return cls._instance
-
-    def _init_logger(self, log_dir: str | None):
-        # 默认锚定 config.LOG_DIR（WORKSPACE_DIR/logs），审计位置不随启动
-        # 目录漂移。logger 不进基准 reload 链——单例首次构造即固化，
-        # 基准全程审计集中落仓库 workspace/logs 一处
-        self.log_dir = log_dir if log_dir is not None else config.LOG_DIR
+    def __init__(self, log_dir: str):
+        # 落点必填:装配方(入口/基准)注入,logger 不自带默认位置
+        self.log_dir = log_dir
         self._self_check_log_dir()
 
         # 无界内存队列，用于缓冲日志事件
@@ -129,4 +120,41 @@ class JSONLEventLogger:
         self.log_queue.put(None)
         self.log_queue.join()
 
-audit_logger = JSONLEventLogger()
+
+def init_audit_logger(log_dir: str) -> JSONLEventLogger:
+    """装配期初始化（入口构造一次）：显式注入落点，构造即自检。
+
+    幂等：同落点重复初始化返回既有实例；换落点拒绝——审计位置装配后
+    固化，静默换址等于既有凭证失去可发现性。构造失败不留半初始化实例
+    （赋值发生在构造成功之后），下次初始化重新走自检。
+    """
+    global _audit_logger
+    with _init_lock:
+        if _audit_logger is not None:
+            if _audit_logger.log_dir != log_dir:
+                raise RuntimeError(
+                    f"审计落点已固化于 {_audit_logger.log_dir!r}，拒绝换址到 {log_dir!r}"
+                    "——审计位置装配后不得改写。"
+                )
+            return _audit_logger
+        _audit_logger = JSONLEventLogger(log_dir=log_dir)
+        return _audit_logger
+
+
+def get_audit_logger() -> JSONLEventLogger:
+    """取用装配好的审计 logger；未初始化即拒绝——无审计不运行。"""
+    if _audit_logger is None:
+        raise RuntimeError(
+            "审计 logger 未初始化：入口须先 init_audit_logger(log_dir)"
+            "（无审计不运行）"
+        )
+    return _audit_logger
+
+
+def current_audit_log_dir() -> str | None:
+    """当前审计落点（未初始化为 None）。
+
+    给"锚定与否先查再算"的装配方用（基准整场锚一次）：落点来自
+    WorkspaceConfig.from_env() 时先查再算,未锚定的进程才付读 env 的代价。
+    """
+    return None if _audit_logger is None else _audit_logger.log_dir

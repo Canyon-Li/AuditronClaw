@@ -16,7 +16,7 @@ TYPE_CHECKING，环不进运行期。
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from ..logger import audit_logger
+from ..logger import get_audit_logger
 
 if TYPE_CHECKING:
     from .classifier import RiskAssessment
@@ -80,7 +80,7 @@ class AuditReceiptHook(ToolHook):
 
     def after(self, ctx: ToolCallContext, result):
         if type(result) is Receipt:
-            audit_logger.log_event(
+            get_audit_logger().log_event(
                 thread_id="system", event="system_action",
                 content=result.audit_content)
             return str(result)  # 还原普通 str：回执取出后不留子类痕迹

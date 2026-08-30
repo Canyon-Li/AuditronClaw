@@ -32,13 +32,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _is_tasks_write_open(node):
-    """open() 首实参引用 TASKS_FILE 且模式含写位(w/a/x/+)——读模式不算。"""
+    """open() 首实参引用队列落点参数(tasks_file)且模式含写位(w/a/x/+)——读模式不算。"""
     if not (isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
             and node.func.id == "open"
             and node.args):
         return False
-    if not any(isinstance(n, ast.Name) and n.id == "TASKS_FILE"
+    if not any(isinstance(n, ast.Name) and n.id == "tasks_file"
                for n in ast.walk(node.args[0])):
         return False
     mode_node = node.args[1] if len(node.args) > 1 else None
@@ -62,7 +62,7 @@ class TestWriteEntryConvergence(unittest.TestCase):
         """全仓只此一处写打开,且嵌在 _write_tasks 函数体内。"""
         hits = []  # (相对路径, 行号)
         # 生产代码全量扫描:包本体、入口、示例与基准——tests 自建临时文件,
-        # 不经 TASKS_FILE 常量,不在收敛范围内
+        # 自持路径变量,不在收敛范围内
         for py in sorted(sum((list(REPO_ROOT.glob(f"{d}/**/*.py"))
                               for d in ("auditronclaw", "entry",
                                         "benchmarks", "examples")), [])):
@@ -72,7 +72,7 @@ class TestWriteEntryConvergence(unittest.TestCase):
 
         self.assertEqual(
             len(hits), 1,
-            f"对 TASKS_FILE 的写打开必须唯一(当前: {hits});"
+            f"对队列落点参数(tasks_file)的写打开必须唯一(当前: {hits});"
             "新增写点一律改调 _write_tasks")
 
         builtins_py = REPO_ROOT / "auditronclaw" / "core" / "tools" / "builtins.py"
@@ -94,11 +94,8 @@ class TestAtomicTasksWrite(unittest.TestCase):
     def setUp(self):
         self.tmp_dir = tempfile.mkdtemp()
         self.tasks_path = os.path.join(self.tmp_dir, "tasks.json")
-        self._orig_tasks_file = builtins_mod.TASKS_FILE
-        builtins_mod.TASKS_FILE = self.tasks_path
 
     def tearDown(self):
-        builtins_mod.TASKS_FILE = self._orig_tasks_file
         import shutil
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
@@ -134,7 +131,7 @@ class TestAtomicTasksWrite(unittest.TestCase):
 
         with patch.object(builtins_mod.json, "dump", half_dump):
             with self.assertRaises(OSError):
-                builtins_mod._write_tasks(self._new_tasks())
+                builtins_mod._write_tasks(self._new_tasks(), self.tasks_path)
 
         with open(self.tasks_path, encoding="utf-8") as f:
             self.assertEqual(json.load(f), self._old_tasks(),
@@ -144,7 +141,7 @@ class TestAtomicTasksWrite(unittest.TestCase):
         """成功路径:新内容整体替换,中文不转义、缩进保留,无 tmp 残留。"""
         self._write_old_file()
 
-        builtins_mod._write_tasks(self._new_tasks())
+        builtins_mod._write_tasks(self._new_tasks(), self.tasks_path)
 
         with open(self.tasks_path, encoding="utf-8") as f:
             content = f.read()
@@ -159,7 +156,7 @@ class TestAtomicTasksWrite(unittest.TestCase):
         done = threading.Event()
 
         def run():
-            builtins_mod._write_tasks(self._new_tasks())
+            builtins_mod._write_tasks(self._new_tasks(), self.tasks_path)
             done.set()
 
         worker = threading.Thread(target=run)

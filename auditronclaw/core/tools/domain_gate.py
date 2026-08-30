@@ -1,6 +1,6 @@
 import os
 
-from ..logger import audit_logger
+from ..logger import get_audit_logger
 
 # ============ 域名白名单（网络实名门第一落地） ============
 #
@@ -28,6 +28,18 @@ _LAST_ENV_RAW: str | None = None
 # 名单三来源见 CONTEXT.md「域名白名单」：默认 ∪ 环境变量扩展 ∪ 运行时审批规则
 _APPROVAL_DOMAIN_PATTERNS: list = []
 
+# 审批规则文件落点（装配期注入，05 票）：域名规则的读盘点必须与审批门
+# 的 matcher 同源——都在装配点拿 workspace.approval_rules_file。分类器是
+# 纯函数、路径不经参数面渗入，故本模块持装配期落点。None=未装配，
+# 读作空模式集（fail-closed：少一条放行通道，不多放行）。
+_approval_rules_file: str | None = None
+
+
+def init_domain_gate(approval_rules_file: str) -> None:
+    """装配期注入：审批规则文件落点（create_agent_app 处与 RuleStore 同源）。"""
+    global _approval_rules_file
+    _approval_rules_file = approval_rules_file
+
 
 def load_extended_domains():
     """
@@ -39,7 +51,7 @@ def load_extended_domains():
     raw = os.getenv("AUDITRONCLAW_ALLOWED_DOMAINS", "")
     extended = {d.strip().lower() for d in raw.split(",") if d.strip()}
     if extended:
-        audit_logger.log_event(
+        get_audit_logger().log_event(
             thread_id="system",
             event="system_action",
             content=f"域名白名单扩展生效（AUDITRONCLAW_ALLOWED_DOMAINS）: {sorted(extended)}"
@@ -53,14 +65,16 @@ def load_approval_rule_domains() -> list:
 
     即时读盘、每次全读——铸规则/撤销/夹具预置当次生效，不重启，与审批
     规则匹配（RuleStore 每次匹配读盘）同一机制。文件缺失/损坏=空模式集
-    （fail-closed，守卫照常拒）。
+    （fail-closed，守卫照常拒）；未装配落点同样=空模式集（少放行）。
 
     延迟导入打破环：approval.rules → classifier → 本模块，模块顶层 import
     会循环；调用期三者均已就绪。
     """
     from ..approval.classifier import RISK_DOMAIN_EXTEND
     from ..approval.rules import RuleStore
-    return [rule.scope for rule in RuleStore().list_rules()
+    if _approval_rules_file is None:
+        return []
+    return [rule.scope for rule in RuleStore(path=_approval_rules_file).list_rules()
             if rule.action == RISK_DOMAIN_EXTEND]
 
 
