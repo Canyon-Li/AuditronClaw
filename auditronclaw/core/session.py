@@ -147,7 +147,7 @@ class SessionEngine:
             return ApprovalDecision(approved=False, persist=False,
                                     source=DecisionSource.TIMEOUT)
         except Exception:
-            # 应答通道故障≠挂起整个回合:按无人拒收口,单 worker 队列不堵
+            # 应答通道故障≠挂起整个回合:按无人拒收尾,单 worker 队列不堵
             return ApprovalDecision(approved=False, persist=False,
                                     source=DecisionSource.UNATTENDED)
         return ensure_decision(decision)

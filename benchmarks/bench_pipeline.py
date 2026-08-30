@@ -108,9 +108,9 @@ APPROVAL_FORM_UNATTENDED = "unattended"
 APPROVAL_FORM_ATTENDED_AUTO_APPROVE = "attended_auto_approve"
 
 
-# ============ 邮箱事务台 fixture(零真实网络注入缝) ============
+# ============ 邮箱事务台 fixture(注入点,零真实网络) ============
 
-# 邮箱事务台注入缝(接缝 B 的基准侧):fixture 邮箱 + 假 sender + 占位凭据。
+# 邮箱事务台注入点(注入点 B 的基准侧):fixture 邮箱 + 假 sender + 占位凭据。
 # 占位凭据骗过工具层"未配置不碰网络"的前置检查——离开本上下文即还原生产通道。
 _BENCH_MAIL_ENV = {
     "MAIL_ACCOUNT": "bench@fixture.local",

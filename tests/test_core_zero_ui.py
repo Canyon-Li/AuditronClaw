@@ -30,7 +30,7 @@ from langgraph.checkpoint.memory import MemorySaver
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 
-# ============ 假件:脚本化 LLM + 探针工具(零真实网络,同 01/02 票缝) ============
+# ============ 假件:脚本化 LLM + 探针工具(零真实网络,同 01/02 票注入点) ============
 
 @tool
 def fake_probe(query: str) -> str:
@@ -56,7 +56,7 @@ THREAD_ID = "ui_leak_test"
 
 
 def _enter_fake_patches(stack, llm):
-    """现有缝三件套 + 强制触发上下文裁剪(同 01 票三重 patch)。
+    """现有注入点三件套 + 强制触发上下文裁剪(同 01 票三重 patch)。
 
     audit_logger 不在此处假化——钉子三需要拿到 mock 断言调用,由该测试自 patch。
     """

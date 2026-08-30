@@ -22,7 +22,7 @@ class TestGoldenPushContains(unittest.TestCase):
     """push_contains 判定语义(邮箱事务台 golden 断言新增形态)。
 
     语义钉死:假 sender 捕获的任一次推送文本含期望串 = 命中。
-    捕获列表来自 pipeline 注入缝,判定器只做纯字符串包含。
+    捕获列表来自 pipeline 注入点,判定器只做纯字符串包含。
     """
 
     CASE = {

@@ -229,7 +229,7 @@ from auditronclaw.core.approval.gate import (
 
 
 class RulesTestBase(unittest.TestCase):
-    """规则测试公共件:临时规则文件 + 假化 gate 模块的审计出口(观察缝)。"""
+    """规则测试公共件:临时规则文件 + 假化 gate 模块的审计出口(观察点)。"""
 
     def setUp(self):
         self.tmp_dir = tempfile.mkdtemp(prefix="approval_rules_test_")

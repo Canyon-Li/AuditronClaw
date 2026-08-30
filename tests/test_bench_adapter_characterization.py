@@ -1,6 +1,6 @@
 """基准适配器表征测试(会话引擎 02 票重构护栏)。
 
-先钉后切:在 _drive_agent 切换为引擎驱动之前,用假 LLM 缝(同 01 票
+先钉后切:在 _drive_agent 切换为引擎驱动之前,用假 LLM 注入点(同 01 票
 tests/test_session_engine.py 的三重 patch)把结果 dict 逐字段拍死——
 切换只许换驱动方式,不许动输出形状与语义。这是重构护栏,不是先红后绿的
 新行为:本文件对旧手写解析与引擎驱动实现都必须绿。
@@ -26,7 +26,7 @@ from langchain_core.tools import tool
 import bench_pipeline
 
 
-# ============ 假件:脚本化 LLM + 探针工具(零真实网络,同 01 票缝) ============
+# ============ 假件:脚本化 LLM + 探针工具(零真实网络,同 01 票注入点) ============
 
 @tool
 def fake_probe(query: str) -> str:
@@ -79,7 +79,7 @@ SCRIPT = [
 
 
 def _enter_fake_tool_patches(stack, llm):
-    """现有缝三件套 + 审批门入册:假 LLM + 假工具表 + 空技能表 + 假工具入副作用册。
+    """现有注入点三件套 + 审批门入册:假 LLM + 假工具表 + 空技能表 + 假工具入副作用册。
 
     假探针工具按"新工具入册即加映射"纪律注册为纯读——本文件钉的是适配器
     结果 dict 的形状,不是审批门(门的行为由 tests/test_approval_gate.py 把守)。

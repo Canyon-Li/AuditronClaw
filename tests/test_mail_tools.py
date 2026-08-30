@@ -216,7 +216,7 @@ class TestReadRecentEmailsSecurity(unittest.TestCase):
         self.assertTrue(os.path.exists(system_log), "system 级审计日志应存在")
         with open(system_log, encoding="utf-8") as f:
             full_text = f.read()
-        # 两轮回执都真实落盘了（成功 + 错误兜底），钉子不是空转
+        # 两轮回执都真实落盘了（成功 + 错误兜底），钉子不是形同虚设
         self.assertIn("邮箱读取回执", full_text)
         self.assertIn("邮箱读取失败", full_text)
         self.assertNotIn(secret, full_text)

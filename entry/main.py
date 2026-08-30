@@ -117,7 +117,7 @@ def cprint(text="", end="\n"):
 # 由 handle_turn_event 在事件流里到达即打印(patch_stdout 护行),状态条以
 # bridge.pending 提示"审批等待应答"。引擎超时掐死应答器时 future 即死,
 # 死条目即时出桥(状态条同拍收回,不等操作员下次提交);输入循环退出时
-# close() 把挂起审批一律按无人拒,回合必能收口(单 worker 队列不被悬而
+# close() 把挂起审批一律按无人拒,回合必能收尾(单 worker 队列不被悬而
 # 未决的审批挂死)。
 
 _APPROVAL_ALIASES = {
@@ -245,7 +245,7 @@ class ApprovalBridge:
             return False
 
     def close(self) -> int:
-        """输入循环退出时收口:挂起审批一律按无人拒(操作员已离场)。
+        """输入循环退出时收尾:挂起审批一律按无人拒(操作员已离场)。
 
         回合必能收尾——单 worker 队列不被一条悬而未决的审批挂死。
         """
@@ -259,10 +259,10 @@ class ApprovalBridge:
 
 
 async def drain_bridge_until(bridge: ApprovalBridge, await_done: asyncio.Future) -> int:
-    """退出后的收口循环:await_done 完成前,桥里迟到的挂起审批一律按无人拒。
+    """退出后的收尾循环:await_done 完成前,桥里迟到的挂起审批一律按无人拒。
 
     输入循环退出时回合可能仍在跑(队列里还有未消费的回合),审批在其后
-    才入桥——已经没有应答的人了,不等审批超时,逐拍收口直至 await_done
+    才入桥——已经没有应答的人了,不等审批超时,逐拍收尾直至 await_done
     (默认 5 分钟的超时兜底仍在,这里只是把退出从"最久等满超时"收紧到
     "下一拍即拒")。返回累计按无人拒的条数。
     """
@@ -291,7 +291,7 @@ async def answer_pending_approvals(
         read_task = asyncio.create_task(read_answer(request))
         await asyncio.wait({read_task, fut}, return_when=asyncio.FIRST_COMPLETED)
         if fut.done():
-            # 引擎已终局(超时拒绝/退出收口):提示作废,读到一半也收回
+            # 引擎已终局(超时拒绝/退出收尾):提示作废,读到一半也收回
             read_task.cancel()
             try:
                 await read_task
@@ -590,7 +590,7 @@ async def async_main(thread_id: str = "local_geek_master"):
             worker = asyncio.create_task(agent_worker())
             heartbeat_worker = asyncio.create_task(pacemaker_loop(task_queue=task_queue, tasks_file=cfg.tasks_file, check_interval=10))
             await user_input_loop()
-            # 输入循环已退出:join 期间持续收口——回合若在其后才弹出审批,
+            # 输入循环已退出:join 期间持续收尾——回合若在其后才弹出审批,
             # 也按无人拒(不等审批超时,退出不被拖长)
             join_task = asyncio.create_task(task_queue.join())
             denied = await drain_bridge_until(bridge, join_task)

@@ -115,8 +115,8 @@ def create_profile_tool(thread_id: str, memory_dir: str):
     """
     按会话构造 save_user_profile 工具(工厂)。
     会话身份与画像落点(memory_dir)在此 bake 进闭包——工具层无需知道
-    当前 thread_id 与工作区,调用方(agent 创建工具时)按会话注入即可。
-    thread_id 组装期即归一化(非法 id 当场拒,不等到首调才炸)。
+    当前 thread_id 与工作区,调用方(agent 创建工具时)按会话传入即可。
+    thread_id 组装期即归一化(非法 id 当场拒,不等到首次调用才报错)。
     画像写入前读旧内容做行级 diff,记入审计日志(画像变更留痕)。
     """
     profile_path = _profile_path(thread_id, memory_dir)
