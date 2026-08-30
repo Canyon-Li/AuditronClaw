@@ -2,7 +2,7 @@ import imaplib
 import json
 import os
 from datetime import datetime, timedelta
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from .base import auditronclaw_tool
 from .domain_gate import require_domain, DEFAULT_ALLOWED_DOMAINS
@@ -123,10 +123,14 @@ def _imap_provider(config: dict, hours: int, max_emails: int) -> list:
             status, msg_data = imap.fetch(mid, "(RFC822)")
             if status != "OK" or not msg_data or msg_data[0] is None:
                 continue
+            raw = msg_data[0][1]
+            if not isinstance(raw, bytes):
+                continue  # IMAP 响应元组里偶有非载荷项(状态码),跳过
             import email as email_lib
-            msg = email_lib.message_from_bytes(msg_data[0][1])
+            msg = email_lib.message_from_bytes(raw)
+            date_hdr = msg.get("Date")
             try:
-                date = parsedate_to_datetime(msg.get("Date"))
+                date = parsedate_to_datetime(date_hdr) if date_hdr else None
             except (TypeError, ValueError):
                 date = None
             if date is not None and date.tzinfo is not None:
@@ -168,7 +172,7 @@ def load_fixture_provider(path: str) -> Callable:
         with open(path, encoding="utf-8") as f:
             raw = json.load(f)
         cutoff = datetime.now() - timedelta(hours=hours)
-        mails = []
+        mails: list[dict[str, Any]] = []
         for item in raw:
             date = datetime.fromisoformat(item["date"])
             if date < cutoff:

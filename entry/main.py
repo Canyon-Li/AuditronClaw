@@ -1,5 +1,4 @@
 import os
-import sys
 import time
 import json
 import asyncio
@@ -49,7 +48,6 @@ def print_banner():
     CYAN = '\033[38;5;51m'
     PURPLE = '\033[38;5;141m'
     SILVER = '\033[38;5;250m'
-    DIM = '\033[2m'
     BOLD = '\033[1m'
     RESET = '\033[0m'
     WHITE = '\033[37m'

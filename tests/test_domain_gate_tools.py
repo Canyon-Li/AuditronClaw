@@ -49,6 +49,51 @@ class TestDomainGatePureFunction(unittest.TestCase):
                 self.assertFalse(check_domain_allowed("api.github.com"))
 
 
+class TestDomainGateImportSafety(unittest.TestCase):
+    """import 期不读 env（F2）：域名扩展的预热归装配期，不归模块加载期。
+
+    历史：import 期读 AUDITRONCLAW_ALLOWED_DOMAINS、非空即落审计回执——
+    变量一旦进进程环境（shell export 过），任何 import 本模块的入口都在
+    logger 初始化前 RuntimeError。预热挪进 init_domain_gate（装配期
+    logger 已锚定），模块级只留惰性默认。
+    """
+
+    def test_import_with_env_preset_does_not_crash(self):
+        """子进程预置非空扩展变量后 import 链不炸（回归钉子）。"""
+        import subprocess
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        code = "import auditronclaw.core.tools.domain_gate"
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=repo_root,
+            env={**os.environ, "AUDITRONCLAW_ALLOWED_DOMAINS": "api.github.com"},
+            capture_output=True, text=True,
+        )
+        self.assertEqual(
+            result.returncode, 0,
+            f"import 期读 env 应已挪出模块加载期。stderr: {result.stderr}",
+        )
+
+    def test_init_prewarms_env_extension(self):
+        """装配期行为不变：init 预热 env 扩展——审计恰一次、名单进缓存可放行"""
+        with patch("auditronclaw.core.logger._audit_logger") as mock_logger:
+            with patch.dict(os.environ, {"AUDITRONCLAW_ALLOWED_DOMAINS": "api.github.com"}):
+                domain_gate._LAST_ENV_RAW = None
+                domain_gate._EXTENDED_DOMAINS = set()
+                try:
+                    domain_gate.init_domain_gate("unused_rules.json")
+                    self.assertEqual(domain_gate._EXTENDED_DOMAINS, {"api.github.com"})
+                    # 预热后判定直接命中缓存（不依赖 refresh 兜底）
+                    self.assertTrue(check_domain_allowed("api.github.com"))
+                    mock_logger.log_event.assert_called_once()
+                    _, kwargs = mock_logger.log_event.call_args
+                    self.assertEqual(kwargs.get("event"), "system_action")
+                    self.assertIn("api.github.com", kwargs.get("content", ""))
+                finally:
+                    domain_gate._LAST_ENV_RAW = None
+                    domain_gate._EXTENDED_DOMAINS = set()
+
+
 class TestDomainGateAudit(unittest.TestCase):
     """守卫的审计事件形态（与 shell 白名单扩展同构）。"""
 

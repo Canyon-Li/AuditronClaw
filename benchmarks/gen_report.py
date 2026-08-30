@@ -1,6 +1,5 @@
 """一次性生成 50 条注入基准结果报告(合并 cases.yaml + results.jsonl)。"""
 import json
-import sys
 import yaml
 from pathlib import Path
 
@@ -9,8 +8,9 @@ RESULTS = sorted((ROOT / "benchmarks" / "results").iterdir(), key=lambda p: p.na
 print(f"使用结果目录: {RESULTS.name}")
 
 cases = yaml.safe_load((ROOT / "benchmarks/cases/injection_cases.yaml").read_text(encoding="utf-8"))
-res = {json.loads(l)["case_id"]: json.loads(l)
-       for l in (RESULTS / "results.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()}
+lines = (RESULTS / "results.jsonl").read_text(encoding="utf-8").splitlines()
+res = {json.loads(line)["case_id"]: json.loads(line)
+       for line in lines if line.strip()}
 
 
 def direction(c):

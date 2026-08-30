@@ -1,4 +1,3 @@
-import asyncio
 import json
 import os
 import sys
@@ -13,7 +12,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from helpers import FakeSender, InjectedProvider, InjectedSender
 
-from auditronclaw.core.tools import feishu_tool, mail_tool
 from auditronclaw.core.tools.feishu_tool import send_feishu_summary
 from auditronclaw.core.tools.mail_tool import read_recent_emails
 from auditronclaw.core.tools.builtins import create_task_tools

@@ -11,6 +11,12 @@ from .tools.builtins import (
 )
 from .approval.gate import TurnOrigin
 from .bus import TurnRequest
+from .logger import get_audit_logger
+
+# 读盘失败去抖（F3）：上次已记回执的错误签名。坏 JSON 在修复前每个
+# 周期都撞同一处，回执只记首次；读盘恢复正常即重置——下一次失败是
+# 新一案，照记。
+_last_read_error_key: str | None = None
 
 
 def _next_occurrence(target_dt: datetime, repeat: str) -> datetime:
@@ -54,15 +60,33 @@ async def pacemaker_loop(task_queue: asyncio.Queue, tasks_file: str, check_inter
         pending_tasks = []
         triggered_tasks = []
 
+        global _last_read_error_key
+
         #线程锁，防止多线程/多协程同时读写任务文件导致的竞争条件和数据损坏
         with tasks_lock:
             try:
                 with open(tasks_file, "r", encoding="utf-8") as f:
                     content = f.read().strip()
                     if not content:
+                        _last_read_error_key = None
                         continue
                     raw_tasks = json.loads(content)
-            except Exception:
+                    _last_read_error_key = None
+            except Exception as e:
+                # 读失败落回执（F3，替换原裸 except 的静默空转）：历史损伤
+                # JSON 曾让心跳永久无回执空转。去抖——同一错误只记一次。
+                error_key = f"{type(e).__name__}: {e}"
+                if error_key != _last_read_error_key:
+                    _last_read_error_key = error_key
+                    get_audit_logger().log_event(
+                        thread_id="system",
+                        event="system_action",
+                        content=(
+                            f"心跳读任务队列失败（{error_key}）：{tasks_file}。"
+                            "本轮跳过——不触发、不续期；同一错误持续不再重复"
+                            "记录，修复后恢复正常记录。"
+                        ),
+                    )
                 continue
 
             if not raw_tasks:
@@ -100,8 +124,20 @@ async def pacemaker_loop(task_queue: asyncio.Queue, tasks_file: str, check_inter
             if triggered_tasks or dropped_invalid:
                 try:
                     _write_tasks([t.model_dump() for t in pending_tasks], tasks_file)
-                except Exception:
-                    pass
+                except Exception as e:
+                    # 写回失败落回执（F3，替换原静默 pass）：当轮触发消息
+                    # 照发，但续期/移出未落盘，队列文件保持旧内容——
+                    # 丢失必须可见，不吞。
+                    get_audit_logger().log_event(
+                        thread_id="system",
+                        event="system_action",
+                        content=(
+                            f"心跳写回任务队列失败"
+                            f"（{type(e).__name__}: {e}）：{tasks_file}。"
+                            "本轮触发消息照发，但续期与移出未落盘，"
+                            "队列文件保持旧内容。"
+                        ),
+                    )
 
         for t in triggered_tasks:
             system_msg = (

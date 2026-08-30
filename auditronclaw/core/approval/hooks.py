@@ -62,6 +62,9 @@ class Receipt(str):
 
     __slots__ = ("audit_content",)
 
+    # 声明给类型检查器看:值经 __new__ 赋进 slot,mypy 推不出来
+    audit_content: str
+
     def __new__(cls, content: str, audit_content: str):
         self = super().__new__(cls, content)
         self.audit_content = audit_content

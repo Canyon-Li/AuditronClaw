@@ -1,6 +1,6 @@
 from typing import List, Optional
 from langchain_core.tools import BaseTool
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import StateGraph, START
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_core.messages import HumanMessage, RemoveMessage, SystemMessage
 from .context import AgentState, trim_context_messages
@@ -101,7 +101,7 @@ def create_agent_app(
 
     # 外接工具按个追加(ADR-001):内置全保留;同名时外接覆盖内置,且只保留一个。
     # 注意外接工具不经过命令白名单与路径防护(仅调用被审计),注入者自担安全责任。
-    extra_names = frozenset()
+    extra_names: "frozenset[str]" = frozenset()
     if extra_tools:
         extra_by_name = {t.name: t for t in extra_tools}
         actual_tools = [extra_by_name.pop(t.name, t) for t in actual_tools]
@@ -152,9 +152,10 @@ def create_agent_app(
                     result_summary = msg.content[:200]
                 )
 
-        current_summary = state.get("summary", "")
+        current_summary = str(state.get("summary", ""))
         final_msgs, discarded_msgs = trim_context_messages(raw_messages, trigger_turns=40, keep_turns=10)
-        state_updates = {}
+        # LangGraph 部分状态更新包:messages 装消息或 RemoveMessage、summary 装 str
+        state_updates: dict = {}
 
         if discarded_msgs:
             # core 零 UI 依赖:观测走审计事件(monitor 渲染 system_action),不走 TUI print
@@ -177,7 +178,7 @@ def create_agent_app(
         
             # 这里可以用便宜模型
             new_summary_response = llm.invoke([HumanMessage(content=summary_prompt)], config={"callbacks":[]})
-            active_summary = new_summary_response.content
+            active_summary = str(new_summary_response.content)
 
             # 更新摘要
             state_updates["summary"] = active_summary

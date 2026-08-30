@@ -1,5 +1,4 @@
 import unittest
-from unittest.mock import mock_open, patch
 import os
 import shutil
 import sys

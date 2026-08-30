@@ -37,13 +37,13 @@ def trim_context_messages(messages: list[BaseMessage], trigger_turns: int = 8, k
     total_turns = len(turns)
 
     if total_turns < trigger_turns:
-        final_messages = ([first_system] if first_system else []) + non_system_msgs
+        final_messages: list[BaseMessage] = ([first_system] if first_system else []) + non_system_msgs
         return final_messages, []
-    
+
     recent_turns = turns[-keep_turns:]
     discarded_turns = turns[:-keep_turns]
 
-    final_messages: list[BaseMessage] = []
+    final_messages = []
     if first_system:
         final_messages.append(first_system)
     for turn in recent_turns:

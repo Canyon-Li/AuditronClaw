@@ -136,6 +136,9 @@ class TestAtomicTasksWrite(unittest.TestCase):
         with open(self.tasks_path, encoding="utf-8") as f:
             self.assertEqual(json.load(f), self._old_tasks(),
                              "崩溃后正式文件必须原封保留旧队列且可解析")
+        self.assertFalse(os.path.exists(self.tasks_path + ".tmp"),
+                         "抛错后不得残留无主 tmp 文件（下次成功写会覆盖，"
+                         "但半截 tmp 躺在目录里没有意义）")
 
     def test_successful_write_replaces_content(self):
         """成功路径:新内容整体替换,中文不转义、缩进保留,无 tmp 残留。"""

@@ -166,7 +166,7 @@ class SessionEngine:
         """
         config = {"configurable": {"thread_id": self.thread_id,
                                    "turn_origin": origin.value}}
-        inputs = {"messages": [HumanMessage(content=text)]}
+        inputs: dict | Command = {"messages": [HumanMessage(content=text)]}
 
         tool_calls: List[dict] = []
         tool_results: List[dict] = []

@@ -3,13 +3,13 @@ import os
 import shutil
 import sys
 import tempfile
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from auditronclaw.core.config import WorkspaceConfig
 from auditronclaw.core.context import AgentState
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain_core.tools import StructuredTool
 
 
 def _tmp_workspace(testcase):
@@ -24,7 +24,6 @@ class TestAgent(unittest.TestCase):
 
     def test_agent_state_initialization(self):
         """测试 AgentState 的初始化"""
-        from auditronclaw.core.context import AgentState
 
         initial_state = AgentState(
             messages=[],
@@ -183,6 +182,49 @@ class TestAgent(unittest.TestCase):
         except Exception as e:
             print(f"Unexpected error: {e}")
             raise
+
+
+class TestAssemblyWiresAuditReceiptHook(unittest.TestCase):
+    """装配级 hooks 钉子（F8）：经 create_agent_app 装配的工具，执行后回执必落盘。
+
+    hooks 注册是 agent.py 装配点的代码事实（wrap_all_tools(..., hooks=
+    (AuditReceiptHook(),))），但此前无测试钉住——删掉注册不会红（对比
+    egress 有 meta-test 强制）。本测试从装配点走到审计 jsonl：删掉 hooks
+    注册，Receipt 无人取出落盘，本测试必红。
+    """
+
+    def test_assembled_tool_receipt_lands_in_audit_file(self):
+        """装配的工具执行后，回执内容出现在真实审计文件的 system.jsonl"""
+        from auditronclaw.core.agent import create_agent_app
+        from auditronclaw.core.approval.hooks import Receipt
+        from auditronclaw.core.logger import get_audit_logger
+
+        marker = "装配级回执标记：F8钉子"
+        # calculator 在分类册里是纯读名（免批直通）：不需要审批应答器即可执行
+        stub = StructuredTool.from_function(
+            func=lambda x: Receipt("结果正文", marker),
+            name="calculator", description="纯读桩：返回携带回执的 Receipt")
+
+        with patch('auditronclaw.core.agent.get_provider') as mock_get_provider:
+            mock_provider = Mock()
+            mock_provider.bind_tools.return_value = Mock()
+            mock_get_provider.return_value = mock_provider
+            create_agent_app(provider_name="openai", model_name="stub",
+                             workspace=_tmp_workspace(self), tools=[stub])
+
+        # 与 LLM 绑定的就是包装后的工具（装配点接线的事实面）
+        gated_tools = mock_provider.bind_tools.call_args[0][0]
+        result = gated_tools[0].invoke({"x": 1})
+        self.assertEqual(result, "结果正文")
+        self.assertIs(type(result), str, "回执取出后还原为普通 str")
+
+        # 回执落盘：等真实异步队列写完，system.jsonl 全文必含回执标记
+        get_audit_logger().log_queue.join()
+        system_log = os.path.join(get_audit_logger().log_dir, "system.jsonl")
+        with open(system_log, encoding="utf-8") as f:
+            full_text = f.read()
+        self.assertIn(marker, full_text,
+                      "经装配的工具执行后回执必须落盘——hooks 注册被删即红")
 
 
 class TestPromptConfidentiality(unittest.TestCase):

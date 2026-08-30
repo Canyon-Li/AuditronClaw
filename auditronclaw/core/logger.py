@@ -29,7 +29,7 @@ class JSONLEventLogger:
         self._self_check_log_dir()
 
         # 无界内存队列，用于缓冲日志事件
-        self.log_queue = queue.Queue()
+        self.log_queue: "queue.Queue[dict]" = queue.Queue()
 
         self.worker_thread = threading.Thread(target=self._write_loop, daemon=True)
         self.worker_thread.start()

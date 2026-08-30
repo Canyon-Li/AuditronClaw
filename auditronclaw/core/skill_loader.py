@@ -55,7 +55,7 @@ class LazySkillLoader:
         self._office_dir = office_dir
         self._skill_registry: Optional[List[Dict[str, Any]]] = None
         self._cache_size = cache_size
-        self._last_scan_time = 0
+        self._last_scan_time = 0.0
         self._scan_interval = 60  # 缓存元数据扫描结果60秒
     
     @lru_cache(maxsize=50)
@@ -249,7 +249,7 @@ class LazySkillLoader:
         """清除所有缓存"""
         self._load_skill_content.cache_clear()
         self._skill_registry = None
-        print(f" [OK] 技能缓存已清除")
+        print(" [OK] 技能缓存已清除")
 
 
 def load_dynamic_skills(skills_dir: str, office_dir: str,

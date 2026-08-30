@@ -2,7 +2,7 @@ from typing import Any, Type
 from langchain_core.tools import BaseTool, tool
 from abc import ABC, abstractmethod
 import asyncio
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 # 将 LangChain 原生的 @tool 装饰器重命名并暴露出去。
 # 开发者在使用 AuditronClaw 写简单工具时，只需要加一个装饰器和写好 docstring 即可。

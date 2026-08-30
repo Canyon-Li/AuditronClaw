@@ -62,13 +62,13 @@ def test_lazy_loading():
 
     try:
         # 测试 1: 扫描技能
-        print(f"\n[测试 1.1] 扫描技能目录...")
+        print("\n[测试 1.1] 扫描技能目录...")
         count = loader.get_tool_count()
         print(f"[OK] 扫描到 {count} 个技能")
         assert count == 5, f"期望 5 个技能，实际 {count}"
 
         # 测试 2: 获取工具（懒加载占位符）
-        print(f"\n[测试 1.2] 获取工具列表（懒加载）...")
+        print("\n[测试 1.2] 获取工具列表（懒加载）...")
         start_time = time.time()
         tools = loader.get_all_tools()
         elapsed = time.time() - start_time
@@ -76,16 +76,16 @@ def test_lazy_loading():
         assert len(tools) == 5, f"期望 5 个工具，实际 {len(tools)}"
 
         # 测试 3: 验证工具属性
-        print(f"\n[测试 1.3] 验证工具属性...")
+        print("\n[测试 1.3] 验证工具属性...")
         for i, tool in enumerate(tools):
             print(f"  - 工具 {i}: {tool.name}")
             assert "lazy_runner" in str(tool.func), f"工具 {tool.name} 不是懒加载函数"
-        print(f"[OK] 所有工具都是懒加载模式")
+        print("[OK] 所有工具都是懒加载模式")
 
         # 测试 4: 模拟首次调用（触发完整加载）
         # 注意:os.listdir 顺序由文件系统决定(NTFS 字母序,ext4 哈希序),
         # 不能假设 tools[0] 是 test_skill_0,必须按工具名查找
-        print(f"\n[测试 1.4] 模拟首次调用技能（触发完整内容加载）...")
+        print("\n[测试 1.4] 模拟首次调用技能（触发完整内容加载）...")
         tool_0 = next(t for t in tools if t.name == "Test_Skill_0")
         start_time = time.time()
         result = tool_0.func(mode='help')
@@ -95,15 +95,15 @@ def test_lazy_loading():
         assert "Test Skill 0" in result, "技能内容未正确加载"
 
         # 测试 5: 第二次调用（应该使用缓存）
-        print(f"\n[测试 1.5] 第二次调用（应该使用缓存）...")
+        print("\n[测试 1.5] 第二次调用（应该使用缓存）...")
         start_time = time.time()
-        result2 = tool_0.func(mode='help')
+        tool_0.func(mode='help')
         elapsed2 = time.time() - start_time
         print(f"[OK] 第二次调用耗时: {elapsed2:.4f}秒")
         if elapsed2 > 0:
             print(f"[OK] 速度提升: {(elapsed / elapsed2):.2f}x")
         else:
-            print(f"[OK] 速度提升: 缓存响应极快 (< 0.001s)")
+            print("[OK] 速度提升: 缓存响应极快 (< 0.001s)")
         assert elapsed2 <= elapsed, "第二次调用应该更快或相等（使用缓存）"
 
         print("\n" + "=" * 60)
@@ -111,14 +111,14 @@ def test_lazy_loading():
         print("=" * 60)
 
         # 测试 6: 添加新技能
-        print(f"\n[测试 2.1] 添加新技能...")
+        print("\n[测试 2.1] 添加新技能...")
         new_skill_dir = os.path.join(skills_dir, "new_skill")
         os.makedirs(new_skill_dir, exist_ok=True)
         with open(os.path.join(new_skill_dir, "SKILL.md"), "w", encoding="utf-8") as f:
             f.write("name: New Skill\ndescription: 新添加的技能")
 
         # 强制重新扫描
-        print(f"\n[测试 2.2] 强制重新扫描...")
+        print("\n[测试 2.2] 强制重新扫描...")
         tools_after = loader.get_all_tools(force_rescan=True)
         print(f"[OK] 扫描后技能数: {len(tools_after)}")
         assert len(tools_after) == 6, f"期望 6 个技能，实际 {len(tools_after)}"
@@ -128,13 +128,13 @@ def test_lazy_loading():
         print("=" * 60)
 
         # 测试 7: 清除缓存
-        print(f"\n[测试 3.1] 清除缓存...")
+        print("\n[测试 3.1] 清除缓存...")
         loader.clear_cache()
 
         # 再次调用应该重新加载
-        print(f"\n[测试 3.2] 缓存清除后首次调用...")
+        print("\n[测试 3.2] 缓存清除后首次调用...")
         start_time = time.time()
-        result3 = tool_0.func(mode='help')
+        tool_0.func(mode='help')
         elapsed3 = time.time() - start_time
         print(f"[OK] 缓存清除后调用耗时: {elapsed3:.4f}秒")
 
@@ -145,7 +145,7 @@ def test_lazy_loading():
     finally:
         # 清理临时目录
         shutil.rmtree(temp_dir, ignore_errors=True)
-        print(f"\n[OK] 临时测试目录已清理")
+        print("\n[OK] 临时测试目录已清理")
 
 
 def test_load_dynamic_skills_assembles_from_given_dirs():

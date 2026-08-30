@@ -15,8 +15,9 @@ from ..skill_loader import expand_skill_command
 from ..tools.domain_gate import check_domain_allowed
 from ..tools.mail_tool import IMAP_DOMAIN
 from ..tools.feishu_tool import FEISHU_WEBHOOK_DOMAIN
+# 冗余别名即显式再导出:测试经 classifier 命名空间取 _BASE_ALLOWED_COMMANDS
+from ..tools.sandbox_tools import _BASE_ALLOWED_COMMANDS as _BASE_ALLOWED_COMMANDS
 from ..tools.sandbox_tools import (
-    _BASE_ALLOWED_COMMANDS,
     _CMD_VAR_PATTERN,
     _FIND_HAZARD_FLAGS,
     _INTERPRETERS,

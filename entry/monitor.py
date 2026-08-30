@@ -64,7 +64,7 @@ def print_header():
 def tail_f(filepath):
     """文件末尾监听"""
     if not os.path.exists(filepath):
-        console.print(f"[warning]⏳ 等待日志文件生成...[/warning]")
+        console.print("[warning]⏳ 等待日志文件生成...[/warning]")
         while not os.path.exists(filepath):
             time.sleep(0.5)
 
@@ -85,10 +85,11 @@ def render_event(line: str):
         event = data.get("event")
         ts_str = data.get("ts", "") 
         try:
-            if ts_str.endswith('Z'): ts_str = ts_str[:-1] + '+00:00'
+            if ts_str.endswith('Z'):
+                ts_str = ts_str[:-1] + '+00:00'
             dt_local = datetime.fromisoformat(ts_str).astimezone()
             ts = dt_local.strftime("%H:%M:%S")
-        except:
+        except Exception:
             ts = ts_str.split("T")[-1][:8]
             
         prefix = f"[timestamp][ {ts} ][/timestamp] "
@@ -114,7 +115,8 @@ def render_event(line: str):
             action = data.get("content", "")
             console.print(f"{prefix}[warning]✦ 底层状态机：{action}[/warning]")
             
-    except: pass
+    except Exception:
+        pass  # 单行解析失败跳过:监控流不容一行坏数据断流
 
 def main(thread_id: str = DEFAULT_THREAD_ID):
     # 与主程序同源的工作区装配(05 票):monitor 是独立进程,自己读环境

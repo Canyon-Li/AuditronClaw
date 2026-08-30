@@ -130,7 +130,6 @@ from auditronclaw.core.approval.gate import (
 )
 from auditronclaw.core.session import (
     ApprovalRequest,
-    Reply,
     SessionEngine,
     ToolResult,
     TurnEnd,
@@ -163,7 +162,6 @@ class TestDomainExtensionClosedLoop(DomainRuleTestBase):
 
     def test_unattended_rejected_then_persist_then_silent_pass(self):
         fake = FakeSender()
-        calls = 0
 
         def responder(req: ApprovalRequest):
             return ApprovalDecision(True, True, DecisionSource.USER_PERSIST)

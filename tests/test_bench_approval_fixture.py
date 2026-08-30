@@ -27,7 +27,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 from langchain_core.messages import AIMessage
 from langchain_core.tools import StructuredTool
-from langgraph.checkpoint.memory import MemorySaver
 
 from auditronclaw.core.approval.gate import REJECT_PHRASE
 from auditronclaw.core.config import WorkspaceConfig
