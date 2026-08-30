@@ -4,9 +4,39 @@ import asyncio
 import calendar
 from datetime import datetime, timedelta
 from .config import TASKS_FILE
-from .tools.builtins import tasks_lock, _write_tasks
+from .tools.builtins import (
+    TASK_TIME_FORMAT,
+    _validated_tasks,
+    _write_tasks,
+    tasks_lock,
+)
 from .approval.gate import TurnOrigin
 from .bus import TurnRequest
+
+
+def _next_occurrence(target_dt: datetime, repeat: str) -> datetime:
+    """循环任务的下一次触发时刻。
+
+    repeat 经 ScheduledTask 的 Literal 校验，取值穷尽四值；
+    monthly 按次月同日推进，月末按次月最后一天钳制（1月31日 → 2月28/29日），
+    12月跨年。
+    """
+    if repeat == "hourly":
+        return target_dt + timedelta(hours=1)
+    if repeat == "daily":
+        return target_dt + timedelta(days=1)
+    if repeat == "weekly":
+        return target_dt + timedelta(days=7)
+    # monthly
+    month = target_dt.month + 1
+    year = target_dt.year
+    if month > 12:
+        month = 1
+        year += 1
+    last_day = calendar.monthrange(year, month)[1]
+    day = min(target_dt.day, last_day)
+    return target_dt.replace(year=year, month=month, day=day)
+
 
 async def pacemaker_loop(task_queue: asyncio.Queue, check_interval: int = 10):
     """
@@ -14,10 +44,10 @@ async def pacemaker_loop(task_queue: asyncio.Queue, check_interval: int = 10):
     """
     while True:
         await asyncio.sleep(check_interval)
-        
+
         if not os.path.exists(TASKS_FILE):
             continue
-            
+
         now = datetime.now()
         pending_tasks = []
         triggered_tasks = []
@@ -29,65 +59,45 @@ async def pacemaker_loop(task_queue: asyncio.Queue, check_interval: int = 10):
                     content = f.read().strip()
                     if not content:
                         continue
-                    tasks = json.loads(content)
+                    raw_tasks = json.loads(content)
             except Exception:
                 continue
-                
-            if not tasks:
+
+            if not raw_tasks:
                 continue
 
-            for t in tasks:
-                try:
-                    #这个target_dt 是任务的目标触发时间
-                    target_dt = datetime.strptime(t["target_time"], "%Y-%m-%d %H:%M:%S")
-                    if now >= target_dt:
+            # 读盘边界统一过模型：校验失败的条目已在 _validated_tasks 内
+            # 记审计回执并跳过（替换原裸 except 的静默吞掉）——不触发、
+            # 不续期，写回时自然移出队列
+            valid_tasks = _validated_tasks(raw_tasks)
+            dropped_invalid = len(valid_tasks) < len(raw_tasks)
 
-                        triggered_tasks.append(t) #记录为“需要触发”
+            for t in valid_tasks:
+                # target_time 格式由 ScheduledTask 保证可解析，此处不会抛错
+                target_dt = datetime.strptime(t.target_time, TASK_TIME_FORMAT)
+                if now >= target_dt:
 
-                        #如果是循环任务就把次数减1，次数耗尽就不再触发
-                        repeat_freq = t.get("repeat")
-                        if repeat_freq:
-                            repeat_count = t.get("repeat_count")
-                            
+                    triggered_tasks.append(t) #记录为“需要触发”
 
-                            if repeat_count is not None:
-                                if repeat_count <= 1:
-                                    continue
-                                else:
-                                    t["repeat_count"] = repeat_count - 1
-
-
-                            if repeat_freq == "hourly":
-                                next_dt = target_dt + timedelta(hours=1)
-                            elif repeat_freq == "daily":
-                                next_dt = target_dt + timedelta(days=1)
-                            elif repeat_freq == "weekly":
-                                next_dt = target_dt + timedelta(days=7)
-                            elif repeat_freq == "monthly":
-                                month = target_dt.month + 1
-                                year = target_dt.year
-                                if month > 12:
-                                    month = 1
-                                    year += 1
-                                last_day = calendar.monthrange(year, month)[1]
-                                day = min(target_dt.day, last_day)
-                                next_dt = target_dt.replace(year=year, month=month, day=day)
-                            else:
+                    #如果是循环任务就把次数减1，次数耗尽就不再触发
+                    if t.repeat:
+                        if t.repeat_count is not None:
+                            if t.repeat_count <= 1:
                                 continue
-                                
-                            t["target_time"] = next_dt.strftime("%Y-%m-%d %H:%M:%S")
-                            pending_tasks.append(t)
-                    else:
+                            t.repeat_count = t.repeat_count - 1
 
-                        pending_tasks.append(t) #还未到触发时间的任务继续保留在待办列表里
-                except Exception:
+                        t.target_time = _next_occurrence(
+                            target_dt, t.repeat).strftime(TASK_TIME_FORMAT)
+                        pending_tasks.append(t)
+                else:
 
-                    pass
+                    pending_tasks.append(t) #还未到触发时间的任务继续保留在任务队列里
 
-            #将还没到触发时间的任务和续期后的循环任务写回文件，覆盖原有内容
-            if triggered_tasks:
+            #触发过任务或校验移除过坏条目，才把存留任务写回文件——
+            #经 model_dump 走 _write_tasks 原子替换
+            if triggered_tasks or dropped_invalid:
                 try:
-                    _write_tasks(pending_tasks)
+                    _write_tasks([t.model_dump() for t in pending_tasks])
                 except Exception:
                     pass
 
@@ -95,7 +105,7 @@ async def pacemaker_loop(task_queue: asyncio.Queue, check_interval: int = 10):
             system_msg = (
                 f"【系统内部心跳触发】\n"
                 f"你设定的定时任务已到期，请立即主动提醒用户或执行动作。\n"
-                f"任务内容：{t['description']}"
+                f"任务内容：{t.description}"
             )
             # 来源类型化(frozen 信封):心跳回合在构造上即无人值守,
             # 前缀文本只是给模型看的提示,不再承担来源标记职责
