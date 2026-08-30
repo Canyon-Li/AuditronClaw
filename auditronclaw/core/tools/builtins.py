@@ -1,4 +1,8 @@
 from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+
 from .base import auditronclaw_tool, AuditronClawBaseTool
 from .desk_tool import submit_mailbox_desk_report
 import ast
@@ -222,16 +226,87 @@ def _write_tasks(tasks) -> None:
     os.replace(TASKS_FILE + ".tmp", TASKS_FILE)
 
 
+TASK_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+class ScheduledTask(BaseModel):
+    """任务队列条目（tasks.json 单条）的唯一形状声明。
+
+    此前形状散在 dict 字面量、docstring 与各消费点约 8 处暗示、零校验；
+    现在读写文件边界统一 model_validate / model_dump，形状只此一处：
+    - repeat 收紧四值 Literal——心跳续期分支从此穷尽，拼错值在入队或
+      读盘时即被拒，不再"触发一次后静默消失"；
+    - target_time 严格格式：入口校验（schedule_task）与心跳触发解析
+      同一口径；
+    - extra="allow"：队列文件是唯一样本，心跳续期整文件重写，未声明的
+      键（未来版本加的字段）随模型透传，不因本版模型不识而丢字段。
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    target_time: str
+    description: str
+    repeat: Literal["hourly", "daily", "weekly", "monthly"] | None = None
+    repeat_count: int | None = None
+
+    @field_validator("target_time")
+    @classmethod
+    def _check_target_time_format(cls, value: str) -> str:
+        try:
+            datetime.strptime(value, TASK_TIME_FORMAT)
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"target_time 必须严格遵循 '{TASK_TIME_FORMAT}' 格式") from e
+        return value
+
+
+def _validated_tasks(raw_tasks) -> list[ScheduledTask]:
+    """读盘后的统一校验入口：条目逐一过 ScheduledTask.model_validate。
+
+    校验失败记审计回执再跳过（替换原 heartbeat 裸 except 的静默吞掉）：
+    被拒条目不进本轮处理（不触发、不续期、不进列表渲染），调用方写回
+    队列时自然将其移出；回执落 system 级事件，拒绝可见、可追。
+    回执只记条目标识与首条错误，不倾倒原条目——坏值可能任意大。
+    """
+    valid = []
+    for raw in raw_tasks:
+        try:
+            valid.append(ScheduledTask.model_validate(raw))
+        except ValidationError as e:
+            first = e.errors()[0]
+            loc = ".".join(str(part) for part in first["loc"])
+            ident = ""
+            if isinstance(raw, dict) and raw.get("id"):
+                ident = f"（条目 {raw['id']}）"
+            audit_logger.log_event(
+                thread_id="system",
+                event="system_action",
+                content=(
+                    f"任务队列校验拒绝{ident}：{loc} {first['msg']}。"
+                    "该条目被跳过——不触发、不续期，写回队列时移出。"
+                ),
+            )
+    return valid
+
+
 def _append_task(target_time: str, description: str, repeat: str = None, repeat_count: int = None) -> None:
     """
     向任务队列文件追加一条任务（线程锁内读-改-写）。
 
-    追加待办条目的唯一入口：schedule_task 与事务台提交工具共用，
-    保证 tasks.json 的条目形状（id/target_time/description/repeat/repeat_count）
-    始终一致——不管待办是人定的还是事务台提炼的。
-    落盘走 _write_tasks（原子替换）；读取/写入异常向上抛，
-    由调用方决定如何向 LLM 结构化报告。
+    追加任务条目的唯一入口：schedule_task 与事务台提交工具共用，
+    不管条目是人定的还是事务台从邮件提炼的。条目形状由 ScheduledTask
+    唯一声明——此处构造模型（repeat 取值、时间格式在构造期即被校验，
+    非法值向上抛 ValidationError，由调用方决定如何向 LLM 结构化报告），
+    落盘经 model_dump 走 _write_tasks（原子替换）；读取/写入异常向上抛。
     """
+    task = ScheduledTask(
+        id=str(uuid.uuid4())[:8],
+        target_time=target_time,
+        description=description,
+        repeat=repeat,
+        repeat_count=repeat_count,
+    )
     with tasks_lock:
         tasks = []
         if os.path.exists(TASKS_FILE):
@@ -243,13 +318,7 @@ def _append_task(target_time: str, description: str, repeat: str = None, repeat_
             except Exception as e:
                 raise RuntimeError(f"读取任务队列异常 {str(e)}")
 
-        tasks.append({
-            "id": str(uuid.uuid4())[:8],
-            "target_time": target_time,
-            "description": description,
-            "repeat": repeat,
-            "repeat_count": repeat_count
-        })
+        tasks.append(task.model_dump())
 
         try:
             _write_tasks(tasks)
@@ -265,7 +334,7 @@ def schedule_task(target_time: str, description: str, repeat: str = None, repeat
     参数 description 是需要执行的动作或要说的话。
     
     【高级循环功能】：
-    - repeat (可选): 设置重复频率。可选值为 "hourly", "daily", "weekly"。如果不重复请留空。
+    - repeat (可选): 设置重复频率。可选值为 "hourly", "daily", "weekly", "monthly"。如果不重复请留空。
     - repeat_count (可选): 结合 repeat 使用，表示一共需要触发几次。
     
     【案例教学】：
@@ -296,6 +365,11 @@ def schedule_task(target_time: str, description: str, repeat: str = None, repeat
 
     try:
         _append_task(target_time, description, repeat, repeat_count)
+    except ValidationError:
+        return (
+            "设定失败：repeat 取值非法，可选值为 hourly/daily/weekly/monthly"
+            "（不重复请留空）。"
+        )
     except RuntimeError as e:
         return f"设定失败：{str(e)}"
 
@@ -314,25 +388,28 @@ def list_scheduled_tasks() -> str:
     with tasks_lock:
         if not os.path.exists(TASKS_FILE):
             return "当前没有任何定时任务。"
-        
+
         try:
             with open(TASKS_FILE, "r", encoding="utf-8") as f:
                 content = f.read().strip()
                 if not content:
                     return "任务列表为空。"
-                tasks = json.loads(content)
-            
-            if not tasks:
-                return "当前没有任何定时任务。"
-            
-            tasks.sort(key=lambda x: x['target_time'])
-            
-            res = " 当前待执行任务列表：\n"
-            for t in tasks:
-                res += f"- [ID: {t['id']}] 时间: {t['target_time']} | 任务: {t['description']}\n"
-            return res
+                raw_tasks = json.loads(content)
         except Exception as e:
             return f"查询失败：{str(e)}"
+
+        # 文件边界统一校验：坏条目记回执跳过，好条目照常渲染
+        tasks = _validated_tasks(raw_tasks)
+
+        if not tasks:
+            return "当前没有任何定时任务。"
+
+        tasks.sort(key=lambda t: t.target_time)
+
+        res = " 当前待执行任务列表：\n"
+        for t in tasks:
+            res += f"- [ID: {t.id}] 时间: {t.target_time} | 任务: {t.description}\n"
+        return res
     
 
 @auditronclaw_tool
@@ -360,18 +437,22 @@ def delete_scheduled_task(task_id: str) -> str:
         try:
             with open(TASKS_FILE, "r", encoding="utf-8") as f:
                 content = f.read().strip()
-                tasks = json.loads(content) if content else []
-            
-            new_tasks = [t for t in tasks if t['id'] != task_id]
-            
-            if len(new_tasks) == len(tasks):
-                return f"删除失败：未找到 ID 为 {task_id} 的任务。"
-            
-            _write_tasks(new_tasks)
-
-            return f" 任务 [ID: {task_id}] 已成功取消。"
+                raw_tasks = json.loads(content) if content else []
         except Exception as e:
             return f"操作异常：{str(e)}"
+
+        tasks = _validated_tasks(raw_tasks)
+        new_tasks = [t for t in tasks if t.id != task_id]
+
+        if len(new_tasks) == len(tasks):
+            return f"删除失败：未找到 ID 为 {task_id} 的任务。"
+
+        try:
+            _write_tasks([t.model_dump() for t in new_tasks])
+        except Exception as e:
+            return f"操作异常：{str(e)}"
+
+        return f" 任务 [ID: {task_id}] 已成功取消。"
     
 
 @auditronclaw_tool
@@ -398,36 +479,42 @@ def modify_scheduled_task(task_id: str, new_time: str = None, new_description: s
         try:
             with open(TASKS_FILE, "r", encoding="utf-8") as f:
                 content = f.read().strip()
-                tasks = json.loads(content) if content else []
-            
-            found = False
-            for t in tasks:
-                if t['id'] == task_id:
-                    if new_time:
-                        parsed_new_time = datetime.strptime(new_time, "%Y-%m-%d %H:%M:%S")
-                        now = datetime.now()
-                        if parsed_new_time <= now:
-                            return (
-                                "修改失败：new_time 必须晚于当前时间。"
-                                f" 当前时间：{now.strftime('%Y-%m-%d %H:%M:%S')}，"
-                                f" 你传入的是：{new_time}"
-                            )
-                        t['target_time'] = new_time
-                    if new_description:
-                        t['description'] = new_description
-                    found = True
-                    break
-            
-            if not found:
-                return f"修改失败：未找到 ID 为 {task_id} 的任务。"
-            
-            _write_tasks(tasks)
-
-            return f" 任务 [ID: {task_id}] 已成功更新。"
-        except ValueError:
-            return "修改失败：时间格式错误。"
+                raw_tasks = json.loads(content) if content else []
         except Exception as e:
             return f"操作异常：{str(e)}"
+
+        tasks = _validated_tasks(raw_tasks)
+
+        found = False
+        for t in tasks:
+            if t.id == task_id:
+                if new_time:
+                    try:
+                        parsed_new_time = datetime.strptime(new_time, TASK_TIME_FORMAT)
+                    except ValueError:
+                        return "修改失败：时间格式错误。"
+                    now = datetime.now()
+                    if parsed_new_time <= now:
+                        return (
+                            "修改失败：new_time 必须晚于当前时间。"
+                            f" 当前时间：{now.strftime('%Y-%m-%d %H:%M:%S')}，"
+                            f" 你传入的是：{new_time}"
+                        )
+                    t.target_time = new_time
+                if new_description:
+                    t.description = new_description
+                found = True
+                break
+
+        if not found:
+            return f"修改失败：未找到 ID 为 {task_id} 的任务。"
+
+        try:
+            _write_tasks([t.model_dump() for t in tasks])
+        except Exception as e:
+            return f"操作异常：{str(e)}"
+
+        return f" 任务 [ID: {task_id}] 已成功更新。"
 
 
 BUILTIN_TOOLS = [
