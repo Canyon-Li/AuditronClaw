@@ -43,10 +43,9 @@ class DomainRuleTestBase(unittest.TestCase):
         tmp_dir = tempfile.mkdtemp(prefix="domain_rules_test_")
         self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
         self.rules_path = os.path.join(tmp_dir, "approval_rules.json")
-        # domain_gate 的规则读取与门的 matcher 走同一模块属性(生产同源)
+        # domain_gate 的规则落点经装配注入(05 票):与门的 matcher 同源同文件
         patchers = [
-            patch('auditronclaw.core.approval.rules.APPROVAL_RULES_FILE',
-                  self.rules_path),
+            patch.object(domain_gate, "_approval_rules_file", self.rules_path),
             patch.object(domain_gate, "DEFAULT_ALLOWED_DOMAINS",
                          set(_NO_FEISHU_DEFAULTS)),
             patch.object(domain_gate, "_EXTENDED_DOMAINS", set()),
@@ -75,8 +74,8 @@ class TestApprovalRuleDomainsRuntime(DomainRuleTestBase):
     def test_persisted_domain_rule_allows_without_restart(self):
         """铸规则即生效:同进程 persist 后同域名放行,无需重启或手动刷新"""
         self.assertFalse(check_domain_allowed(FEISHU_DOMAIN))
-        rule = RuleStore().persist_rule(RISK_DOMAIN_EXTEND, FEISHU_DOMAIN,
-                                        "approval", thread_id="domain_test")
+        rule = RuleStore(path=self.rules_path).persist_rule(
+            RISK_DOMAIN_EXTEND, FEISHU_DOMAIN, "approval", thread_id="domain_test")
         self.assertEqual(rule.action, RISK_DOMAIN_EXTEND)
         self.assertTrue(check_domain_allowed(FEISHU_DOMAIN),
                         "域名规则落盘后,同域名判定必须当次放行")
@@ -98,7 +97,7 @@ class TestApprovalRuleDomainsRuntime(DomainRuleTestBase):
 
     def test_revoked_domain_rule_denies_again(self):
         """撤销即失效:撤销后同域名回到名单外(即时读盘,不重启)"""
-        store = RuleStore()
+        store = RuleStore(path=self.rules_path)
         rule = store.persist_rule(RISK_DOMAIN_EXTEND, FEISHU_DOMAIN, "approval")
         self.assertTrue(check_domain_allowed(FEISHU_DOMAIN))
         store.revoke_rule(rule.id)
@@ -106,7 +105,7 @@ class TestApprovalRuleDomainsRuntime(DomainRuleTestBase):
 
     def test_env_change_sensed_once_per_change(self):
         """refresh 生产路径同时感知环境变量变化,且 raw 变化才重审计"""
-        with patch.object(domain_gate, "audit_logger") as mock_logger, \
+        with patch("auditronclaw.core.logger._audit_logger") as mock_logger, \
              patch.dict(os.environ, {"AUDITRONCLAW_ALLOWED_DOMAINS": "a.example"}):
             self.assertTrue(check_domain_allowed("a.example"))
             self.assertTrue(check_domain_allowed("a.example"))
@@ -178,19 +177,22 @@ class TestDomainExtensionClosedLoop(DomainRuleTestBase):
             stack.enter_context(patch(
                 'auditronclaw.core.agent.get_provider',
                 return_value=ScriptedLLM(script)))
-            stack.enter_context(patch('auditronclaw.core.agent.BUILTIN_TOOLS',
-                                      [send_feishu_summary]))
+            stack.enter_context(patch('auditronclaw.core.agent.build_builtin_tools',
+                                      return_value=[send_feishu_summary]))
             stack.enter_context(patch('auditronclaw.core.agent.load_dynamic_skills',
                                       return_value=[]))
             audit_mock = stack.enter_context(
-                patch('auditronclaw.core.approval.gate.audit_logger'))
-            stack.enter_context(patch(
-                'auditronclaw.core.tools.feishu_tool.audit_logger'))
+                patch('auditronclaw.core.logger._audit_logger'))
             stack.enter_context(patch(
                 'auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url',
                 return_value="https://open.feishu.cn/open-apis/bot/v2/hook/SECRET_TOKEN"))
             from auditronclaw.core.agent import create_agent_app
+            from auditronclaw.core.config import WorkspaceConfig
+            # 工作区根=规则文件所在目录:门的 matcher 与域名门读同一份文件
+            workspace = WorkspaceConfig.from_root(os.path.dirname(self.rules_path))
+            workspace.ensure_dirs()
             app = create_agent_app(provider_name="fake", model_name="fake-model",
+                                   workspace=workspace,
                                    checkpointer=MemorySaver(), thread_id="domain_loop")
             engine = SessionEngine(app, "domain_loop", approval_responder=responder)
 

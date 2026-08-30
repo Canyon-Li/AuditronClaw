@@ -29,6 +29,7 @@ final=True 当且仅当该消息无 tool_calls;content 与 tool_calls 并存时
 
 import asyncio
 import inspect
+import os
 from contextlib import aclosing
 from dataclasses import dataclass
 from typing import AsyncIterator, Awaitable, Callable, List, Optional, Union
@@ -42,7 +43,20 @@ from .approval.gate import (
     TurnOrigin,
     ensure_decision,
 )
-from .config import APPROVAL_TIMEOUT_SECONDS
+# ============ 审批等待超时 ============
+#
+# 默认 5 分钟:挂起的审批到期即终局拒绝——单 worker 队列不被一条挂起审批
+# 堵死;超时即终局,不排队等下一个应答。环境变量在引擎构造期读取
+# (装配期取值,不冻结于 import 期)。
+
+_APPROVAL_TIMEOUT_ENV = "AUDITRONCLAW_APPROVAL_TIMEOUT"
+DEFAULT_APPROVAL_TIMEOUT_SECONDS = 300.0
+
+
+def default_approval_timeout() -> float:
+    """构造期读取的审批超时默认(环境变量可配)。"""
+    return float(os.getenv(_APPROVAL_TIMEOUT_ENV,
+                           str(DEFAULT_APPROVAL_TIMEOUT_SECONDS)))
 
 
 # ============ 回合事件 ============
@@ -113,8 +127,9 @@ class SessionEngine:
         self.app = app
         self.thread_id = thread_id
         self.approval_responder = approval_responder
-        # None = 用 config 默认(环境变量可配);显式注入供测试与特殊形态
-        self.approval_timeout = approval_timeout
+        # None = 构造期读环境默认(装配期取值);显式注入供测试与特殊形态
+        self.approval_timeout = (approval_timeout if approval_timeout is not None
+                                 else default_approval_timeout())
 
     async def _await_decision(self, request: ApprovalRequest) -> ApprovalDecision:
         """取审批应答:无通道立即拒;异步应答带超时;异常/垃圾值 fail-closed。"""
@@ -124,9 +139,8 @@ class SessionEngine:
         try:
             outcome = self.approval_responder(request)
             if inspect.isawaitable(outcome):
-                timeout = (self.approval_timeout if self.approval_timeout is not None
-                           else APPROVAL_TIMEOUT_SECONDS)
-                decision = await asyncio.wait_for(outcome, timeout=timeout)
+                decision = await asyncio.wait_for(outcome,
+                                                  timeout=self.approval_timeout)
             else:
                 decision = outcome
         except asyncio.TimeoutError:

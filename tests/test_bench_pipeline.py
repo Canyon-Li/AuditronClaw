@@ -218,25 +218,24 @@ class TestInterpreterSurfaceConservation(unittest.TestCase):
 
 
 class TestBenchAuditAnchoring(unittest.TestCase):
-    """基准进程的审计锚定:整场审计必须落仓库 workspace/logs,不随首用例临时目录漂移。"""
+    """基准进程的审计锚定:整场审计落操作员工作区 logs,不随用例临时目录漂移。"""
 
-    def test_audit_singleton_survives_workspace_reload(self):
-        """导入 bench_pipeline 后再 reload 临时 workspace,审计单例仍锚定仓库 workspace/logs。
+    def test_anchor_pins_to_env_workspace_before_case_workspaces(self):
+        """锚定形态(05 票 reload 链删除后):锚点来自 AUDITRONCLAW_WORKSPACE/logs。
 
-        若单例迟到(首个用例 reload 之后才首次构造),会被首用例的临时目录锚走:
-        位置随场而变、临时目录有被系统清理风险。子进程级验证,与真实 runner
-        同序(导入 → reload → 取单例)。
+        子进程级验证,与真实 runner 同序(读 env 锚定 → 每用例 from_root
+        临时根)——锚定后构造任意用例工作区,审计落点不动。
         """
+        anchor_root = tempfile.mkdtemp(prefix="anchor_probe_")
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         script = (
-            "import sys, tempfile\n"
+            "import sys, os\n"
             f"sys.path.insert(0, {BENCHMARKS_DIR!r})\n"
+            f"os.environ['AUDITRONCLAW_WORKSPACE'] = {anchor_root!r}\n"
             "import bench_pipeline\n"
-            "from bench_pipeline import reload_with_workspace\n"
-            "tmp = tempfile.mkdtemp(prefix='anchor_probe_')\n"
-            "reload_with_workspace(tmp)\n"
-            "from auditronclaw.core.logger import audit_logger\n"
-            "print(audit_logger.log_dir)\n"
+            "bench_pipeline._ensure_audit_anchor()\n"
+            "from auditronclaw.core.logger import get_audit_logger\n"
+            "print(get_audit_logger().log_dir)\n"
         )
         env = {k: v for k, v in os.environ.items() if k != "AUDITRONCLAW_WORKSPACE"}
         out = subprocess.run(
@@ -244,7 +243,18 @@ class TestBenchAuditAnchoring(unittest.TestCase):
             capture_output=True, text=True, cwd=repo_root, env=env, check=True,
         )
         printed_log_dir = out.stdout.strip().splitlines()[-1]
-        self.assertEqual(printed_log_dir, os.path.join(repo_root, "workspace", "logs"))
+        self.assertEqual(printed_log_dir, os.path.join(anchor_root, "logs"))
+
+    def test_anchor_yields_to_existing(self):
+        """已锚定进程(入口/测试夹具先到)锚定步让位:落点不动、不炸。
+
+        测试进程由 conftest 锚到临时目录;基准的锚定步在此必须静默
+        让位(init_audit_logger 异址即拒),锚定权归先到者。
+        """
+        from auditronclaw.core.logger import get_audit_logger
+        before = get_audit_logger().log_dir
+        bench_pipeline._ensure_audit_anchor()
+        self.assertEqual(get_audit_logger().log_dir, before)
 
 
 if __name__ == "__main__":

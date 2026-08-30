@@ -9,7 +9,7 @@ from rich.align import Align
 from rich import box
 from datetime import datetime
 
-from auditronclaw.core import config
+from auditronclaw.core.config import WorkspaceConfig
 
 
 ui_theme = Theme({
@@ -27,11 +27,10 @@ console = Console(theme=ui_theme)
 # 会话标识：与主程序 thread_id 对应的日志文件名前缀（阶段2会话隔离，--thread 参数化）
 DEFAULT_THREAD_ID = "local_geek_master"
 
-def log_file_path(thread_id: str) -> str:
-    """监听落点：与 logger 写侧同锚 config.LOG_DIR（workspace/logs），不盯仓库根 logs/。"""
-    return os.path.join(config.LOG_DIR, f"{thread_id}.jsonl")
-
-LOG_FILE = log_file_path(DEFAULT_THREAD_ID)
+def log_file_path(log_dir: str, thread_id: str) -> str:
+    """监听落点：log_dir 为装配期入参（WorkspaceConfig.log_dir，与 logger
+    写侧同源），不盯仓库根 logs/。"""
+    return os.path.join(log_dir, f"{thread_id}.jsonl")
 
 def print_header():
     """渲染 简约斜体版·AuditronClaw 监控面板"""
@@ -118,7 +117,15 @@ def render_event(line: str):
     except: pass
 
 def main(thread_id: str = DEFAULT_THREAD_ID):
-    log_file = log_file_path(thread_id)
+    # 与主程序同源的工作区装配(05 票):monitor 是独立进程,自己读环境
+    # 解析同一工作区——与 logger 写侧(入口 init_audit_logger(cfg.log_dir))
+    # 锚定同一落点,不盯仓库根 logs/
+    from dotenv import load_dotenv
+    env_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+    load_dotenv(env_path)
+    cfg = WorkspaceConfig.from_env()
+    log_file = log_file_path(cfg.log_dir, thread_id)
     try:
         console.clear()
         for line in tail_f(log_file):

@@ -4,7 +4,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from .base import auditronclaw_tool
-from ..logger import audit_logger
+from ..logger import get_audit_logger
 
 # ============ 事务台结构化提交工具 ============
 #
@@ -97,90 +97,98 @@ def _target_time_for(deadline: Optional[str]) -> str:
     return target.strftime("%Y-%m-%d %H:%M:%S")
 
 
-@auditronclaw_tool(args_schema=DeskReport)
-def submit_mailbox_desk_report(
-    window_hours: int,
-    total_mails: int,
-    todos: list = None,
-    needs_reply: list = None,
-    notices: list = None,
-    ignorable_count: int = 0,
-    ignorable_top_senders: list = None,
-) -> str:
+def create_desk_submit_tool(tasks_file: str):
+    """事务台提交工具装配工厂：待办落点(tasks_file)在此注入。
+
+    队列路径不进模块级常量（05 票）：与 create_task_tools 同一落点由
+    装配方保证——测试与基准各装配各的临时队列文件。
     """
-    提交邮箱事务台日报：把 read_recent_emails 读到的邮件的分类结果作为结构化参数
-    一次性提交。工具内部完成「分类账」渲染、待办落任务列表、飞书推送——你只负责
-    分类判断，不要自己排版日报文本，也不要再调用 send_feishu_summary 或
-    schedule_task 完成本轮事务台的工作。
+    @auditronclaw_tool(args_schema=DeskReport)
+    def submit_mailbox_desk_report(
+        window_hours: int,
+        total_mails: int,
+        todos: list = None,
+        needs_reply: list = None,
+        notices: list = None,
+        ignorable_count: int = 0,
+        ignorable_top_senders: list = None,
+    ) -> str:
+        """
+        提交邮箱事务台日报：把 read_recent_emails 读到的邮件的分类结果作为结构化参数
+        一次性提交。工具内部完成「分类账」渲染、待办落任务列表、飞书推送——你只负责
+        分类判断，不要自己排版日报文本，也不要再调用 send_feishu_summary 或
+        schedule_task 完成本轮事务台的工作。
 
-    【空收件箱】：窗口内一封邮件也没有，同样必须提交空日报（total_mails=0、
-    各列表传空）。空日报是事务台每日运行的存活信号——飞书收不到日报，说明的
-    不是"今天没邮件"，而是"管线没在跑"；不要以没有邮件为由跳过提交。
+        【空收件箱】：窗口内一封邮件也没有，同样必须提交空日报（total_mails=0、
+        各列表传空）。空日报是事务台每日运行的存活信号——飞书收不到日报，说明的
+        不是"今天没邮件"，而是"管线没在跑"；不要以没有邮件为由跳过提交。
 
-    【分类规则】：
-    1. 待办是跨类别正交维度：性质上属于"通知"的邮件（账单、续费提醒）同样携带
-       待办，不要因为它是通知就漏掉待办；
-    2. 需要对方回话的邮件归 needs_reply（朋友来信、等你答复的询问）；
-    3. 纯促销/群发广告归可忽略（只报数量与主要发件人，不逐封列）；
-    4. 其余告知性邮件归 notices。
+        【分类规则】：
+        1. 待办是跨类别正交维度：性质上属于"通知"的邮件（账单、续费提醒）同样携带
+           待办，不要因为它是通知就漏掉待办；
+        2. 需要对方回话的邮件归 needs_reply（朋友来信、等你答复的询问）；
+        3. 纯促销/群发广告归可忽略（只报数量与主要发件人，不逐封列）；
+        4. 其余告知性邮件归 notices。
 
-    【边界（代码强制，非约定）】：
-    1. 推送目标域名固定为飞书 webhook 域，经域名白名单守卫校验——参数面里
-       没有 URL 字段；
-    2. 待办先落盘、后推送：推送失败时待办已安全落在任务列表里；
-    3. deadline 缺失、格式错误或已过期时，工具自动设为明天 09:00，不需要你算时间；
-    4. webhook 等凭据只存在宿主机 .env，不会出现在参数、返回值或审计日志中。
-    """
-    try:
-        report = DeskReport(
-            window_hours=window_hours,
-            total_mails=total_mails,
-            todos=todos or [],
-            needs_reply=needs_reply or [],
-            notices=notices or [],
-            ignorable_count=ignorable_count,
-            ignorable_top_senders=ignorable_top_senders or [],
-        )
+        【边界（代码强制，非约定）】：
+        1. 推送目标域名固定为飞书 webhook 域，经域名白名单守卫校验——参数面里
+           没有 URL 字段；
+        2. 待办先落盘、后推送：推送失败时待办已安全落在任务列表里；
+        3. deadline 缺失、格式错误或已过期时，工具自动设为明天 09:00，不需要你算时间；
+        4. webhook 等凭据只存在宿主机 .env，不会出现在参数、返回值或审计日志中。
+        """
+        try:
+            report = DeskReport(
+                window_hours=window_hours,
+                total_mails=total_mails,
+                todos=todos or [],
+                needs_reply=needs_reply or [],
+                notices=notices or [],
+                ignorable_count=ignorable_count,
+                ignorable_top_senders=ignorable_top_senders or [],
+            )
 
-        # 1. 落待办（先于推送——顺序即"推送失败不吞待办"的保障）。
-        # 惰性导入：注册表在 builtins，模块级互引会成环。
-        from .builtins import _append_task
-        for t in report.todos:
-            desc = f"{t.item} | {t.source}" + (f" | 截止 {t.deadline}" if t.deadline else " | 无截止")
-            _append_task(_target_time_for(t.deadline), desc)
-        if report.todos:
-            audit_logger.log_event(
+            # 1. 落待办（先于推送——顺序即"推送失败不吞待办"的保障）。
+            # 惰性导入：注册表在 builtins，模块级互引会成环。
+            from .builtins import _append_task
+            for t in report.todos:
+                desc = f"{t.item} | {t.source}" + (f" | 截止 {t.deadline}" if t.deadline else " | 无截止")
+                _append_task(tasks_file, _target_time_for(t.deadline), desc)
+            if report.todos:
+                get_audit_logger().log_event(
+                    thread_id="system",
+                    event="system_action",
+                    content=(
+                        f"事务台待办落盘：{len(report.todos)} 项"
+                        "（提交工具 submit_mailbox_desk_report）。"
+                    ),
+                )
+
+            # 2. 推送（共用飞书核心路径：同一注入点、同一道域名门、同一套审计）
+            from . import feishu_tool
+            text = render_desk_report_text(report)
+            pushed, push_message = feishu_tool.push_text_via_bound_domain(
+                text, tool_name=submit_mailbox_desk_report.name
+            )
+
+            # 3. 结构化回执：落盘数与推送结果分开陈述，成功失败都如实
+            if pushed:
+                return (
+                    f"✅ 事务台本轮完成：待办 {len(report.todos)} 项已落任务列表。"
+                    f"{push_message}"
+                )
+            return (
+                f"⚠️ 事务台本轮部分完成：待办 {len(report.todos)} 项已落任务列表，"
+                f"但推送未成功。{push_message}"
+            )
+        except Exception as e:
+            # 结构化错误兜底：只报错误类型，不透传 str(e)（可能内嵌凭据）
+            error_name = type(e).__name__
+            get_audit_logger().log_event(
                 thread_id="system",
                 event="system_action",
-                content=(
-                    f"事务台待办落盘：{len(report.todos)} 项"
-                    "（提交工具 submit_mailbox_desk_report）。"
-                ),
+                content=f"事务台日报提交失败：错误 {error_name}。",
             )
+            return f"❌ 事务台日报提交失败（{error_name}）。待办与推送均未完成，请检查后重试。"
 
-        # 2. 推送（共用飞书核心路径：同一注入点、同一道域名门、同一套审计）
-        from . import feishu_tool
-        text = render_desk_report_text(report)
-        pushed, push_message = feishu_tool.push_text_via_bound_domain(
-            text, tool_name=submit_mailbox_desk_report.name
-        )
-
-        # 3. 结构化回执：落盘数与推送结果分开陈述，成功失败都如实
-        if pushed:
-            return (
-                f"✅ 事务台本轮完成：待办 {len(report.todos)} 项已落任务列表。"
-                f"{push_message}"
-            )
-        return (
-            f"⚠️ 事务台本轮部分完成：待办 {len(report.todos)} 项已落任务列表，"
-            f"但推送未成功。{push_message}"
-        )
-    except Exception as e:
-        # 结构化错误兜底：只报错误类型，不透传 str(e)（可能内嵌凭据）
-        error_name = type(e).__name__
-        audit_logger.log_event(
-            thread_id="system",
-            event="system_action",
-            content=f"事务台日报提交失败：错误 {error_name}。",
-        )
-        return f"❌ 事务台日报提交失败（{error_name}）。待办与推送均未完成，请检查后重试。"
+    return submit_mailbox_desk_report

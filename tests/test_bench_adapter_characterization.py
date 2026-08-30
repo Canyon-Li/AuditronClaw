@@ -87,7 +87,7 @@ def _enter_fake_tool_patches(stack, llm):
     from auditronclaw.core.approval import classifier
     for p in (
         patch('auditronclaw.core.agent.get_provider', return_value=llm),
-        patch('auditronclaw.core.agent.BUILTIN_TOOLS', FAKE_TOOLS),
+        patch('auditronclaw.core.agent.build_builtin_tools', return_value=FAKE_TOOLS),
         patch('auditronclaw.core.agent.load_dynamic_skills', return_value=[]),
         patch.object(classifier, "_PURE_READ_TOOLS",
                      classifier._PURE_READ_TOOLS | {"fake_probe", "fake_check"}),
@@ -97,10 +97,13 @@ def _enter_fake_tool_patches(stack, llm):
 
 def _drive(case, pushes, script=SCRIPT):
     """跑一次 _drive_agent,返回 (结果 dict, workspace 路径)。"""
+    from auditronclaw.core.config import WorkspaceConfig
     with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
         _enter_fake_tool_patches(stack, ScriptedLLM(script))
+        workspace = WorkspaceConfig.from_root(tmp)
+        workspace.ensure_dirs()
         raw = asyncio.run(bench_pipeline._drive_agent(
-            case, tmp, "fake-model", "fake", "pin", pushes))
+            case, workspace, "fake-model", "fake", "pin", pushes))
     return raw, tmp
 
 

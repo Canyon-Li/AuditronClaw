@@ -167,11 +167,13 @@ class TestFullTurnSequence(unittest.TestCase):
 class TestModuleHealth(unittest.TestCase):
     """模块级健康哨兵:async_main 不被自动化执行,它引用的模块级名字
     必须存在——03 票改 import 块丢掉 DB_PATH,真机一跑才报错(2026-08-27
-    04 票手工清单发现),本哨兵补上这个缺口。"""
+    04 票手工清单发现),本哨兵补上这个缺口。05 票起路径走装配期
+    WorkspaceConfig,DB_PATH 常量不再出现在入口名空间。"""
 
     def test_async_main_globals_resolve(self):
         import entry.main as m
-        for name in ("DB_PATH", "create_agent_app", "SessionEngine",
+        for name in ("WorkspaceConfig", "init_audit_logger",
+                     "create_agent_app", "SessionEngine",
                      "pacemaker_loop", "task_queue", "TurnRequest"):
             with self.subTest(name=name):
                 self.assertTrue(hasattr(m, name), f"async_main 引用的 {name} 不在模块名空间")

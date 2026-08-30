@@ -16,7 +16,7 @@ from helpers import FakeSender, InjectedProvider, InjectedSender
 from auditronclaw.core.tools import feishu_tool, mail_tool
 from auditronclaw.core.tools.feishu_tool import send_feishu_summary
 from auditronclaw.core.tools.mail_tool import read_recent_emails
-from auditronclaw.core.tools.builtins import schedule_task
+from auditronclaw.core.tools.builtins import create_task_tools
 
 
 # ============ 事务台部署演练:推送失败路径(邮箱事务台部署接线)============
@@ -39,13 +39,12 @@ class TestDeskRoundPushFailureDrill(unittest.TestCase):
     """断网演练:一轮事务台里推送失败,待办与下一轮都不受影响。"""
 
     def setUp(self):
-        import auditronclaw.core.tools.builtins as builtins_mod
-
         fd, path = tempfile.mkstemp(suffix=".json")
         os.close(fd)
+        os.unlink(path)
         self.temp_path = path
-        self._orig_tasks_file = builtins_mod.TASKS_FILE
-        builtins_mod.TASKS_FILE = path
+        # 队列落点为装配入参(05 票):工具工厂吃临时文件路径
+        self.tools = {t.name: t for t in create_task_tools(path)}
 
         # 占位凭据:断言"不落审计日志全文"时用唯一串,缺席才有意义
         self.secret_url = (
@@ -57,9 +56,6 @@ class TestDeskRoundPushFailureDrill(unittest.TestCase):
         }
 
     def tearDown(self):
-        import auditronclaw.core.tools.builtins as builtins_mod
-
-        builtins_mod.TASKS_FILE = self._orig_tasks_file
         if os.path.exists(self.temp_path):
             os.unlink(self.temp_path)
 
@@ -86,7 +82,7 @@ class TestDeskRoundPushFailureDrill(unittest.TestCase):
 
         # ---- 第 2 步:待办落盘(先于推送——顺序即"推送失败不吞待办"的保障) ----
         tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
-        scheduled = schedule_task.invoke({
+        scheduled = self.tools["schedule_task"].invoke({
             "target_time": tomorrow,
             "description": "还信用卡账单 ¥2,186.00,截止 2026-08-26(来源:招行账单提醒邮件)",
         })
@@ -131,9 +127,9 @@ class TestDeskRoundPushFailureDrill(unittest.TestCase):
             send_feishu_summary.invoke({"summary_text": "邮箱事务台日报(演练)"})
 
         # 等异步队列 flush 到 jsonl,再扫 system 级日志全文
-        from auditronclaw.core.logger import audit_logger
-        audit_logger.log_queue.join()
-        with open(os.path.join(audit_logger.log_dir, "system.jsonl"), encoding="utf-8") as f:
+        from auditronclaw.core.logger import get_audit_logger
+        get_audit_logger().log_queue.join()
+        with open(os.path.join(get_audit_logger().log_dir, "system.jsonl"), encoding="utf-8") as f:
             full_text = f.read()
 
         self.assertIn("飞书推送失败", full_text, "失败必须留可检索的审计事件")

@@ -5,12 +5,13 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_core.messages import HumanMessage, RemoveMessage, SystemMessage
 from .context import AgentState, trim_context_messages
 from .provider import get_provider
-from .tools.builtins import BUILTIN_TOOLS, create_profile_tool
+from .tools.builtins import build_builtin_tools
+from .tools.domain_gate import init_domain_gate
 from .approval.gate import wrap_all_tools
 from .approval.hooks import AuditReceiptHook
 from .approval.rules import RuleStore, make_rule_matcher
-from .logger import audit_logger
-from .config import MEMORY_DIR
+from .logger import get_audit_logger
+from .config import WorkspaceConfig
 from .skill_loader import load_dynamic_skills
 from langchain_core.runnables import RunnableConfig
 import os
@@ -79,16 +80,22 @@ def build_system_prompt(profile_content: str, active_summary: str) -> str:
 def create_agent_app(
     provider_name: str = "openai",
     model_name: str = "gpt-4o-mini",
+    *,
+    workspace: WorkspaceConfig,
     tools: Optional[List[BaseTool]] = None,
     checkpointer = None,
     thread_id: str = "local_geek_master",
     extra_tools: Optional[List[BaseTool]] = None
 ):
+    """装配 agent 应用：工作区路径(workspace)由入口装配期注入(05 票)。
+
+    workspace 必填(即便显式传 tools 注入桩工具)——画像落点、规则文件
+    落点由它给出，不走模块级常量。
+    """
     if tools is None:
-        dynamic_tools = load_dynamic_skills()
-        # 画像工具按会话构造(替换 BUILTIN_TOOLS 里的默认会话版)
-        profile_tool = create_profile_tool(thread_id)
-        actual_tools = [profile_tool if t.name == "save_user_profile" else t for t in BUILTIN_TOOLS] + dynamic_tools
+        dynamic_tools = load_dynamic_skills(workspace.skills_dir, workspace.office_dir)
+        # 内置全套按工作区与会话装配一次:路径与身份经工厂闭包注入
+        actual_tools = build_builtin_tools(workspace, thread_id) + dynamic_tools
     else:
         actual_tools = tools
 
@@ -106,7 +113,9 @@ def create_agent_app(
     # (agent 写面够不着自己的规则),每次匹配即时读盘,铸规则/撤销当次生效。
     # 人来源回合规则未命中时 interrupt 问人(03 票),答"永久允许"即经
     # rule_store 铸规则;心跳/基准/未声明来源构造上不问人,直接拒。
-    rule_store = RuleStore()
+    rule_store = RuleStore(path=workspace.approval_rules_file)
+    # 域名门读同一份规则文件(第三名单源与审批豁免通道同源,装配点单次接线)
+    init_domain_gate(workspace.approval_rules_file)
     # hooks 装配在包装单点(03 票):全部注册工具共用同一观察点,
     # AuditReceiptHook 是回执单源(成功/错误回执由工具登记、hook 统一落盘)
     gated_tools = wrap_all_tools(actual_tools, thread_id=thread_id,
@@ -136,7 +145,7 @@ def create_agent_app(
                 else:
                     break
             for msg in reversed(recent_tool_msgs):
-                audit_logger.log_event(
+                get_audit_logger().log_event(
                     thread_id=thread_id,
                     event="tool_result",
                     tool = msg.name,
@@ -149,7 +158,7 @@ def create_agent_app(
 
         if discarded_msgs:
             # core 零 UI 依赖:观测走审计事件(monitor 渲染 system_action),不走 TUI print
-            audit_logger.log_event(
+            get_audit_logger().log_event(
                 thread_id=thread_id,
                 event="system_action",
                 content="正在更新上下文记忆...",
@@ -179,10 +188,10 @@ def create_agent_app(
         else:
             active_summary = current_summary
 
-        # 读取用户画像(按会话隔离:profiles/<thread_id>.md)
+        # 读取用户画像(按会话隔离:profiles/<thread_id>.md,落点出自装配工作区)
         from .tools.builtins import _profile_path, migrate_legacy_profile
-        migrate_legacy_profile(thread_id)
-        profile_path = _profile_path(thread_id)
+        migrate_legacy_profile(thread_id, workspace.memory_dir)
+        profile_path = _profile_path(thread_id, workspace.memory_dir)
         profile_content = "暂无记录"
         if os.path.exists(profile_path):
             with open(profile_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -200,7 +209,7 @@ def create_agent_app(
                 m.content = m.content.encode('utf-8', 'ignore').decode('utf-8')
 
         # 记录即将发送给发模型的消息 (监控Token)
-        audit_logger.log_event(
+        get_audit_logger().log_event(
             thread_id=thread_id,
             event="llm_input",
             message_count=len(msgs_for_llm)
@@ -211,14 +220,14 @@ def create_agent_app(
         # 解析大模型的回答并记录到日志
         if response.tool_calls:
             for tool_call in response.tool_calls:
-                audit_logger.log_event(
+                get_audit_logger().log_event(
                     thread_id=thread_id,
                     event="tool_call",
                     tool=tool_call["name"],
                     args=tool_call["args"]
                 )
         elif response.content:
-            audit_logger.log_event(
+            get_audit_logger().log_event(
                 thread_id=thread_id,
                 event="ai_message",
                 content=response.content

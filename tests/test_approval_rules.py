@@ -235,7 +235,7 @@ class RulesTestBase(unittest.TestCase):
         self.tmp_dir = tempfile.mkdtemp(prefix="approval_rules_test_")
         self.addCleanup(shutil.rmtree, self.tmp_dir, ignore_errors=True)
         self.rules_path = os.path.join(self.tmp_dir, "approval_rules.json")
-        _patcher = patch('auditronclaw.core.approval.gate.audit_logger')
+        _patcher = patch('auditronclaw.core.logger._audit_logger')
         self.audit_mock = _patcher.start()
         self.addCleanup(_patcher.stop)
 
@@ -473,8 +473,7 @@ class TestGateWithRealRules(RulesTestBase):
 
 # ============ 规则文件对 agent 写面不可达(office 外落点的安全前提) ============
 
-from auditronclaw.core.tools import sandbox_tools
-from auditronclaw.core.tools.sandbox_tools import execute_office_shell, write_office_file
+from auditronclaw.core.tools.sandbox_tools import build_office_tools
 
 
 class TestRulesFileUnreachable(unittest.TestCase):
@@ -491,9 +490,10 @@ class TestRulesFileUnreachable(unittest.TestCase):
         self.office_dir = os.path.join(self.tmp_dir, "office")
         os.makedirs(self.office_dir, exist_ok=True)
         self.rules_path = os.path.join(self.tmp_dir, "approval_rules.json")
-        patcher = patch.object(sandbox_tools, "OFFICE_DIR", self.office_dir)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        # 工位落点经工厂闭包注入(05 票):工具绑定本测试的 office 布局
+        office_tools = {t.name: t for t in build_office_tools(self.office_dir)}
+        self.write_office_file = office_tools["write_office_file"]
+        self.execute_office_shell = office_tools["execute_office_shell"]
 
     def assert_rejected_and_absent(self, result, attempted_path):
         """拒绝话术到位 + 目标文件确实没被写出"""
@@ -506,13 +506,13 @@ class TestRulesFileUnreachable(unittest.TestCase):
                          "office/../approval_rules.json",
                          self.rules_path):
             with self.subTest(filepath=filepath):
-                result = write_office_file.invoke({"filepath": filepath, "content": "pwned"})
+                result = self.write_office_file.invoke({"filepath": filepath, "content": "pwned"})
                 self.assert_rejected_and_absent(result, self.rules_path)
 
     def test_sibling_prefix_escape_closed(self):
         """同前缀兄弟名不是 office 内路径:../office_x 不得经 startswith 漏出"""
         sibling = os.path.join(self.tmp_dir, "office_sibling.txt")
-        result = write_office_file.invoke(
+        result = self.write_office_file.invoke(
             {"filepath": "../office_sibling.txt", "content": "pwned"})
         self.assert_rejected_and_absent(result, sibling)
 
@@ -522,14 +522,14 @@ class TestRulesFileUnreachable(unittest.TestCase):
                         "echo pwned > ..\\approval_rules.json",
                         "type ../approval_rules.json"):
             with self.subTest(command=command):
-                result = execute_office_shell.invoke({"command": command})
+                result = self.execute_office_shell.invoke({"command": command})
                 self.assertIn("拒绝", result, f"逃逸命令必须被拒:{result}")
         self.assertFalse(os.path.exists(self.rules_path))
 
     def test_legitimate_write_inside_office_still_works(self):
         """守门不误伤:office 内正常写不受影响(前缀修复的对照组)"""
         inner = os.path.join(self.office_dir, "inner_ok.txt")
-        result = write_office_file.invoke({"filepath": "inner_ok.txt", "content": "ok"})
+        result = self.write_office_file.invoke({"filepath": "inner_ok.txt", "content": "ok"})
         self.assertIn("成功", result)
         self.assertTrue(os.path.exists(inner))
 
@@ -562,17 +562,21 @@ class _ScriptedLLM:
 class TestAssemblyWiresRules(unittest.TestCase):
     """create_agent_app 构造 RuleStore 并把 matcher 交给门:规则文件驱动放行。"""
 
-    def _app_bound_tools(self, stack, llm):
+    def _workspace_for(self, rules_path):
+        """规则文件落点随 workspace 注入(05 票):以规则文件所在目录为工作区根。"""
+        from auditronclaw.core.config import WorkspaceConfig
+        workspace = WorkspaceConfig.from_root(os.path.dirname(rules_path))
+        workspace.ensure_dirs()
+        return workspace
+
+    def _app_bound_tools(self, stack, llm, workspace):
         from auditronclaw.core.agent import create_agent_app
         stack.enter_context(patch('auditronclaw.core.agent.get_provider', return_value=llm))
         stack.enter_context(patch('auditronclaw.core.agent.load_dynamic_skills', return_value=[]))
         create_agent_app(provider_name="fake", model_name="fake-model",
+                         workspace=workspace,
                          checkpointer=MemorySaver(), thread_id="wire_test")
         return llm.bound
-
-    def _patch_rules_path(self, stack, path):
-        stack.enter_context(patch(
-            'auditronclaw.core.approval.rules.APPROVAL_RULES_FILE', path))
 
     def test_empty_rules_file_keeps_unattended_rejection(self):
         """空规则集:装配点接了 matcher,门照常拒绝并继续(冷启动形态)"""
@@ -580,9 +584,10 @@ class TestAssemblyWiresRules(unittest.TestCase):
         self.addCleanup(shutil.rmtree, tmp_dir, ignore_errors=True)
         llm = _ScriptedLLM([AIMessage(content="done")])
         with ExitStack() as stack:
-            stack.enter_context(patch('auditronclaw.core.approval.gate.audit_logger'))
-            self._patch_rules_path(stack, os.path.join(tmp_dir, "approval_rules.json"))
-            bound = self._app_bound_tools(stack, llm)
+            stack.enter_context(patch('auditronclaw.core.logger._audit_logger'))
+            workspace = self._workspace_for(
+                os.path.join(tmp_dir, "approval_rules.json"))
+            bound = self._app_bound_tools(stack, llm, workspace)
             gated = next(t for t in bound if t.name == "write_office_file")
             result = gated.invoke({"filepath": "wire_probe.py", "content": "x"})
         self.assertIn(REJECT_PHRASE, result)
@@ -599,15 +604,12 @@ class TestAssemblyWiresRules(unittest.TestCase):
         llm = _ScriptedLLM([AIMessage(content="done")])
         with ExitStack() as stack:
             audit_mock = stack.enter_context(
-                patch('auditronclaw.core.approval.gate.audit_logger'))
-            self._patch_rules_path(stack, rules_path)
-            bound = self._app_bound_tools(stack, llm)
+                patch('auditronclaw.core.logger._audit_logger'))
+            workspace = self._workspace_for(rules_path)
+            bound = self._app_bound_tools(stack, llm, workspace)
             gated = next(t for t in bound if t.name == "write_office_file")
-            # 作用域内:放行并真写(写进真实 office 的 wire_zone/,用后即清)
-            from auditronclaw.core.config import OFFICE_DIR
-            probe = os.path.join(OFFICE_DIR, "wire_zone", "seeded.py")
-            self.addCleanup(shutil.rmtree, os.path.join(OFFICE_DIR, "wire_zone"),
-                            ignore_errors=True)
+            # 作用域内:放行并真写(写进临时工作区 office 的 wire_zone/,随根清理)
+            probe = os.path.join(workspace.office_dir, "wire_zone", "seeded.py")
             result_in = gated.invoke({"filepath": "wire_zone/seeded.py", "content": "x"})
             self.assertNotIn(REJECT_PHRASE, result_in)
             self.assertTrue(os.path.exists(probe), "规则命中的写必须真实落盘")

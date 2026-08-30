@@ -7,7 +7,7 @@ from urllib.error import URLError
 from .base import auditronclaw_tool
 from .domain_gate import check_domain_allowed
 from .egress import EgressChannel, register_egress_channel
-from ..logger import audit_logger
+from ..logger import get_audit_logger
 
 # ============ 飞书推送命名工具 ============
 #
@@ -117,7 +117,7 @@ def push_text_via_bound_domain(summary_text: str, tool_name: str):
 
         # 1. 域名白名单守卫：先于传输层执行，名单外拒绝并落审计
         if not check_domain_allowed(FEISHU_WEBHOOK_DOMAIN):
-            audit_logger.log_event(
+            get_audit_logger().log_event(
                 thread_id="system",
                 event="system_action",
                 content=(
@@ -137,7 +137,7 @@ def push_text_via_bound_domain(summary_text: str, tool_name: str):
         response = active_sender(webhook_url, payload)
 
         # 3. 脱敏回执：只有成功/失败与飞书返回码，无 URL 无凭据
-        audit_logger.log_event(
+        get_audit_logger().log_event(
             thread_id="system",
             event="system_action",
             content=(
@@ -151,7 +151,7 @@ def push_text_via_bound_domain(summary_text: str, tool_name: str):
             f"飞书响应码 {response.get('code', 'unknown')}。"
         )
     except URLError as e:
-        audit_logger.log_event(
+        get_audit_logger().log_event(
             thread_id="system",
             event="system_action",
             content=f"飞书推送失败（网络层）：目标域 {FEISHU_WEBHOOK_DOMAIN}，错误类型 {type(e).__name__}。",
@@ -163,7 +163,7 @@ def push_text_via_bound_domain(summary_text: str, tool_name: str):
         # 结构化错误兜底：不把裸异常抛给 LLM。只报错误类型不透传 str(e)——
         # urllib 家族异常的 message 常内嵌完整请求 URL，透传即凭据泄露。
         error_name = type(e).__name__
-        audit_logger.log_event(
+        get_audit_logger().log_event(
             thread_id="system",
             event="system_action",
             content=(

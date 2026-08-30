@@ -24,7 +24,7 @@ from langchain_core.runnables import ensure_config
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.types import interrupt
 
-from ..logger import audit_logger
+from ..logger import get_audit_logger
 from ..skill_loader import SKILL_FOLDER_META_KEY
 from ..tools.domain_gate import (
     DomainDenied,
@@ -130,7 +130,7 @@ RuleMatcher = Callable[[str, dict, RiskAssessment], Optional[dict]]
 
 def _log_approval_requested(thread_id: str, tool_name: str, args: dict,
                             assessment: RiskAssessment) -> None:
-    audit_logger.log_event(
+    get_audit_logger().log_event(
         thread_id=thread_id,
         event=EVENT_APPROVAL_REQUESTED,
         tool=tool_name,
@@ -155,12 +155,12 @@ def _log_approval_decision(thread_id: str, tool_name: str,
     if rule_id is not None:
         # 命中规则的决定带 rule_id:事后能核"是哪条规则放的行"(仅规则路径携带)
         event["rule_id"] = rule_id
-    audit_logger.log_event(**event)
+    get_audit_logger().log_event(**event)
 
 
 def log_rule_persisted(thread_id: str, rule: dict) -> None:
     """规则铸成事件(02 票接线;形状此处定死:条目整体搭载)。"""
-    audit_logger.log_event(
+    get_audit_logger().log_event(
         thread_id=thread_id,
         event=EVENT_RULE_PERSISTED,
         rule=rule,
@@ -169,7 +169,7 @@ def log_rule_persisted(thread_id: str, rule: dict) -> None:
 
 def log_rule_revoked(thread_id: str, rule: dict) -> None:
     """规则撤销事件(批错的规则有回头路,回头路本身可查)。"""
-    audit_logger.log_event(
+    get_audit_logger().log_event(
         thread_id=thread_id,
         event=EVENT_RULE_REVOKED,
         rule=rule,
@@ -217,7 +217,7 @@ def _mint_persist_rules(rule_store, thread_id: str, assessment: RiskAssessment) 
             rule_store.persist_rule(action=assessment.risk_class, scope=scope,
                                     source="approval", thread_id=thread_id)
         except (ValueError, KeyError, OSError) as e:
-            audit_logger.log_event(
+            get_audit_logger().log_event(
                 thread_id=thread_id, event="system_action",
                 content=f"审批规则铸出失败,本次批准仍只生效一次:{e}")
             return
@@ -311,7 +311,7 @@ def wrap_tool(
 
     def _denied_outcome(denied: DomainDenied) -> str:
         """域名拒绝的统一回执:wrapper 单点落盘(03 票),话术原样返回。"""
-        audit_logger.log_event(
+        get_audit_logger().log_event(
             thread_id="system", event="system_action",
             content=domain_denied_audit_content(denied))
         return domain_denied_reply(denied)

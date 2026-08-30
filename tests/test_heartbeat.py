@@ -13,76 +13,61 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 class TestHeartbeatPacemaker(unittest.TestCase):
 
     def setUp(self):
-        """每个测试前创建临时任务文件"""
+        """每个测试前创建临时任务文件(队列落点为装配入参,不碰真实 workspace)"""
         self.temp_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.json')
         # Windows:被句柄占用的文件无法被 os.replace 原子替换(WinError 5)
         self.temp_file.close()
-        self.original_tasks_file = None
-
-        # 保存原始 TASKS_FILE 路径
-        import auditronclaw.core.config
-        self.original_tasks_file = auditronclaw.core.config.TASKS_FILE
-
-        # 设置临时任务文件
-        auditronclaw.core.config.TASKS_FILE = self.temp_file.name
-
-        # 同时 patch heartbeat 模块中的引用
-        import auditronclaw.core.heartbeat
-        auditronclaw.core.heartbeat.TASKS_FILE = self.temp_file.name
-
-        # 写侧经 builtins._write_tasks(原子替换),落点随 builtins.TASKS_FILE——
-        # 三处引用都指向同一临时文件,别让写侧漏到真实 workspace
-        import auditronclaw.core.tools.builtins
-        auditronclaw.core.tools.builtins.TASKS_FILE = self.temp_file.name
 
     def tearDown(self):
         """每个测试后清理临时文件（句柄已在 setUp 关闭）"""
         if os.path.exists(self.temp_file.name):
             os.unlink(self.temp_file.name)
 
-        # 恢复原始路径
-        import auditronclaw.core.config
-        auditronclaw.core.config.TASKS_FILE = self.original_tasks_file
-
-        import auditronclaw.core.heartbeat
-        auditronclaw.core.heartbeat.TASKS_FILE = self.original_tasks_file
-
-        import auditronclaw.core.tools.builtins
-        auditronclaw.core.tools.builtins.TASKS_FILE = self.original_tasks_file
-
     def test_no_tasks_file(self):
         """测试任务文件不存在时的行为"""
         from auditronclaw.core.heartbeat import pacemaker_loop
-        
+
         # 删除临时文件模拟不存在(句柄已在 setUp 关闭,Windows 才允许删除)
         os.unlink(self.temp_file.name)
-        
+
         # 运行一个周期（不等待实际间隔）
         async def run_test():
-            # 直接测试逻辑，不实际等待
-            import auditronclaw.core.heartbeat as hb
-            # 模拟 TASKS_FILE 不存在
-            with patch.object(hb, 'TASKS_FILE', '/nonexistent/path.json'):
-                # 不应该抛出异常
+            # 队列落点为装配入参:文件不存在,起搏器空转不抛
+            queue = asyncio.Queue()
+            worker = asyncio.create_task(
+                pacemaker_loop(task_queue=queue,
+                               tasks_file=self.temp_file.name, check_interval=0.01))
+            await asyncio.sleep(0.05)
+            worker.cancel()
+            try:
+                await worker
+            except asyncio.CancelledError:
                 pass
-        
+
         asyncio.run(run_test())
         # 测试通过：没有异常抛出
 
     def test_empty_tasks_file(self):
         """测试任务文件为空时的行为"""
         from auditronclaw.core.heartbeat import pacemaker_loop
-        
+
         # 写入空内容
         with open(self.temp_file.name, 'w') as f:
             f.write("")
-        
+
         # 运行测试
         async def run_test():
-            import auditronclaw.core.heartbeat as hb
-            # 不应该抛出异常
-            pass
-        
+            queue = asyncio.Queue()
+            worker = asyncio.create_task(
+                pacemaker_loop(task_queue=queue,
+                               tasks_file=self.temp_file.name, check_interval=0.01))
+            await asyncio.sleep(0.05)
+            worker.cancel()
+            try:
+                await worker
+            except asyncio.CancelledError:
+                pass
+
         asyncio.run(run_test())
         # 测试通过：没有异常抛出
 
@@ -299,30 +284,12 @@ class TestPacemakerLoopDailyDeskTask(unittest.TestCase):
     """真跑 pacemaker_loop:due 的 daily 事务台任务触发、续期、不重复。"""
 
     def setUp(self):
-        import auditronclaw.core.config
-        import auditronclaw.core.heartbeat
-        import auditronclaw.core.tools.builtins
-
         fd, path = tempfile.mkstemp(suffix=".json")
         os.close(fd)
+        os.unlink(path)
         self.temp_path = path
-        self._orig_config = auditronclaw.core.config.TASKS_FILE
-        self._orig_heartbeat = auditronclaw.core.heartbeat.TASKS_FILE
-        # 与 TestHeartbeatPacemaker 同法:临时任务文件,不碰真实 workspace。
-        # 写侧经 builtins._write_tasks,三处引用须同指一个临时文件
-        self._orig_builtins = auditronclaw.core.tools.builtins.TASKS_FILE
-        auditronclaw.core.config.TASKS_FILE = path
-        auditronclaw.core.heartbeat.TASKS_FILE = path
-        auditronclaw.core.tools.builtins.TASKS_FILE = path
 
     def tearDown(self):
-        import auditronclaw.core.config
-        import auditronclaw.core.heartbeat
-        import auditronclaw.core.tools.builtins
-
-        auditronclaw.core.config.TASKS_FILE = self._orig_config
-        auditronclaw.core.heartbeat.TASKS_FILE = self._orig_heartbeat
-        auditronclaw.core.tools.builtins.TASKS_FILE = self._orig_builtins
         # Windows:文件被占用时删除会 WinError 32,先确认句柄已关
         if os.path.exists(self.temp_path):
             os.unlink(self.temp_path)
@@ -353,7 +320,8 @@ class TestPacemakerLoopDailyDeskTask(unittest.TestCase):
 
         async def drill():
             worker = asyncio.create_task(
-                pacemaker_loop(task_queue=queue, check_interval=0.05)
+                pacemaker_loop(task_queue=queue, tasks_file=self.temp_path,
+                               check_interval=0.05)
             )
             await asyncio.sleep(seconds)
             worker.cancel()

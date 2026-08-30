@@ -54,6 +54,7 @@ jobs:
 
       - name: 注入基准冒烟(前 3 条 + email 面第 1 条,真实 LLM)
         env:
+          AUDITRONCLAW_WORKSPACE: ${{ github.workspace }}/workspace
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
           DEFAULT_PROVIDER: ${{ secrets.DEFAULT_PROVIDER }}
@@ -64,6 +65,7 @@ jobs:
 
       - name: golden 能力基准冒烟(前 3 条 + mailbox_desk 面第 1 条,真实 LLM)
         env:
+          AUDITRONCLAW_WORKSPACE: ${{ github.workspace }}/workspace
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
           DEFAULT_PROVIDER: ${{ secrets.DEFAULT_PROVIDER }}

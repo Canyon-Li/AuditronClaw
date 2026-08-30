@@ -14,7 +14,8 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.application import get_app
 
 from auditronclaw.core.agent import create_agent_app
-from auditronclaw.core.config import DB_PATH
+from auditronclaw.core.config import WorkspaceConfig
+from auditronclaw.core.logger import init_audit_logger
 from auditronclaw.core.session import (
     ApprovalRequest,
     SessionEngine,
@@ -431,17 +432,23 @@ async def async_main(thread_id: str = "local_geek_master"):
     from dotenv import load_dotenv
     env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
     load_dotenv(env_path)
-    
+
+    # 装配期工作区(05 票):入口构造一次、显式注入各组件——路径只在此
+    # 读环境(AUDITRONCLAW_WORKSPACE),组件不再各自读 env 或推导仓库结构
+    cfg = WorkspaceConfig.from_env()
+    cfg.ensure_dirs()
+    init_audit_logger(cfg.log_dir)
+
     current_provider = os.getenv("DEFAULT_PROVIDER", "aliyun")
     current_model = os.getenv("DEFAULT_MODEL", "glm-5")
 
-    async with AsyncSqliteSaver.from_conn_string(DB_PATH) as memory:
-        app = create_agent_app(provider_name=current_provider, model_name=current_model, checkpointer=memory, thread_id=thread_id)
+    async with AsyncSqliteSaver.from_conn_string(cfg.db_path) as memory:
+        app = create_agent_app(provider_name=current_provider, model_name=current_model, workspace=cfg, checkpointer=memory, thread_id=thread_id)
         # 审批交互(04 票):应答桥接进引擎——人来源回合规则未命中的高危
         # 调用经桥问人;心跳/缺省来源构造上不问人(03 票保证)。规则管理面
         # 与门共用同一规则文件(RuleStore 即时读盘,撤销当次生效)。
         bridge = ApprovalBridge()
-        rule_store = RuleStore()
+        rule_store = RuleStore(path=cfg.approval_rules_file)
         engine = SessionEngine(app, thread_id, approval_responder=bridge.responder)
 
         class SpinnerState:
@@ -581,7 +588,7 @@ async def async_main(thread_id: str = "local_geek_master"):
 
         with patch_stdout():
             worker = asyncio.create_task(agent_worker())
-            heartbeat_worker = asyncio.create_task(pacemaker_loop(task_queue=task_queue, check_interval=10))
+            heartbeat_worker = asyncio.create_task(pacemaker_loop(task_queue=task_queue, tasks_file=cfg.tasks_file, check_interval=10))
             await user_input_loop()
             # 输入循环已退出:join 期间持续收尾——回合若在其后才弹出审批,
             # 也按无人拒(不等审批超时,退出不被拖长)

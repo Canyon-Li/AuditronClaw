@@ -8,6 +8,7 @@
 词汇见 CONTEXT.md「副作用分级/审批门/审批规则」。
 """
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -251,16 +252,22 @@ from auditronclaw.core.approval.gate import (
     wrap_all_tools,
     wrap_tool,
 )
-from auditronclaw.core.tools.builtins import write_office_file
 
 
 class GateTestBase(unittest.TestCase):
     """门测试公共件:假化 gate 模块的审计出口(观察点),真工具真包装。"""
 
     def setUp(self):
-        _patcher = patch('auditronclaw.core.approval.gate.audit_logger')
+        _patcher = patch('auditronclaw.core.logger._audit_logger')
         self.audit_mock = _patcher.start()
         self.addCleanup(_patcher.stop)
+        # 工位落点为装配入参(05 票):临时工位上建办公工具,不碰真实 workspace
+        self.office_dir = tempfile.mkdtemp(prefix="gate_office_")
+        self.addCleanup(shutil.rmtree, self.office_dir, True)
+        from auditronclaw.core.tools.sandbox_tools import build_office_tools
+        office_tools = {t.name: t for t in build_office_tools(self.office_dir)}
+        self.write_office_file = office_tools["write_office_file"]
+        self.execute_office_shell = office_tools["execute_office_shell"]
 
 
 class TestGateWrapper(GateTestBase):
@@ -283,7 +290,7 @@ class TestGateWrapper(GateTestBase):
     def test_high_risk_unattended_rejected_not_executed(self):
         """无人形态:未匹配规则的高危调用立即拒,原工具不执行"""
         calls = []
-        gated = wrap_tool(_spy_tool(write_office_file, calls),
+        gated = wrap_tool(_spy_tool(self.write_office_file, calls),
                           thread_id="gate_test")
         result = gated.invoke({"filepath": "evil.py", "content": "print(1)"})
         self.assertIn(REJECT_PHRASE, result, "拒绝话术必须带拒绝标志词")
@@ -292,7 +299,7 @@ class TestGateWrapper(GateTestBase):
 
     def test_unattended_rejection_audit_pair(self):
         """审计成对:approval_requested → approval_decision(approved=False, source=unattended)"""
-        gated = self._wrap(write_office_file)
+        gated = self._wrap(self.write_office_file)
         gated.invoke({"filepath": "a.py", "content": "x"})
         events = [c.kwargs.get("event") for c in self.audit_mock.log_event.call_args_list]
         self.assertEqual(events, [EVENT_APPROVAL_REQUESTED, EVENT_APPROVAL_DECISION])
@@ -312,7 +319,7 @@ class TestGateWrapper(GateTestBase):
         """规则命中:放行且决定事件 source=rule_auto(02 票接线,注入点先钉死)"""
         calls = []
         rule_matcher = MagicMock(return_value={"id": "r1"})
-        gated = wrap_tool(_spy_tool(write_office_file, calls),
+        gated = wrap_tool(_spy_tool(self.write_office_file, calls),
                           thread_id="gate_test", rule_matcher=rule_matcher)
         result = gated.invoke({"filepath": "a.py", "content": "x"})
         self.assertNotIn(REJECT_PHRASE, result, "规则命中即放行")
@@ -325,8 +332,7 @@ class TestGateWrapper(GateTestBase):
     def test_evaluation_order_classification_before_rules(self):
         """求值顺序钉死:免批调用不经规则(分级在先,规则只豁免必批级)"""
         rule_matcher = MagicMock(return_value={"id": "r1"})
-        from auditronclaw.core.tools.sandbox_tools import execute_office_shell
-        gated_shell = wrap_tool(execute_office_shell, thread_id="gate_test",
+        gated_shell = wrap_tool(self.execute_office_shell, thread_id="gate_test",
                                 rule_matcher=rule_matcher)
         gated_shell.invoke({"command": "ls"})
         rule_matcher.assert_not_called()
@@ -334,7 +340,7 @@ class TestGateWrapper(GateTestBase):
     def test_rule_cannot_downgrade_classification(self):
         """分级结果不受规则影响:规则返回什么都改不了请求事件里的 risk_class"""
         rule_matcher = MagicMock(return_value=None)  # 无规则
-        gated = wrap_tool(write_office_file, thread_id="gate_test",
+        gated = wrap_tool(self.write_office_file, thread_id="gate_test",
                           rule_matcher=rule_matcher)
         gated.invoke({"filepath": "a.py", "content": "x"})
         # 规则匹配器收到的分级是既有定级(write),其后事件携带同一分级
@@ -387,7 +393,15 @@ import asyncio
 import os
 from contextlib import ExitStack
 
-from auditronclaw.core.config import OFFICE_DIR
+from auditronclaw.core.config import WorkspaceConfig
+
+
+def _tmp_workspace(testcase) -> WorkspaceConfig:
+    """临时工作区(05 票):装配点吃显式 workspace,测试自建临时根。"""
+    cfg = WorkspaceConfig.from_root(tempfile.mkdtemp(prefix="gate_ws_"))
+    cfg.ensure_dirs()
+    testcase.addCleanup(shutil.rmtree, cfg.root, True)
+    return cfg
 
 
 class ScriptedLLM:
@@ -417,8 +431,10 @@ class TestAssemblyPointWrapping(unittest.TestCase):
         from auditronclaw.core.agent import create_agent_app
         stack.enter_context(patch('auditronclaw.core.agent.get_provider', return_value=llm))
         stack.enter_context(patch('auditronclaw.core.agent.load_dynamic_skills', return_value=[]))
+        self.workspace = _tmp_workspace(self)
         return create_agent_app(
             provider_name="fake", model_name="fake-model",
+            workspace=self.workspace,
             checkpointer=MemorySaver(), thread_id="assembly_test",
             extra_tools=extra_tools,
         )
@@ -431,9 +447,11 @@ class TestAssemblyPointWrapping(unittest.TestCase):
         with ExitStack() as stack:
             self._create_app_with(stack, llm_mock, extra_tools=[fake_extra])
             bound = llm_mock.bind_tools.call_args[0][0]
-        from auditronclaw.core.tools.builtins import BUILTIN_TOOLS
+        from auditronclaw.core.tools.builtins import build_builtin_tools
+        expected = [t.name for t in build_builtin_tools(self.workspace,
+                                                        "assembly_test")]
         self.assertEqual([t.name for t in bound],
-                         [t.name for t in BUILTIN_TOOLS] + ["fake_extra"],
+                         expected + ["fake_extra"],
                          "包装件同名同序,内置全保留、外接追加")
         for t in bound:
             self.assertTrue(t.metadata.get("approval_gate"),
@@ -445,7 +463,7 @@ class TestAssemblyPointWrapping(unittest.TestCase):
         llm_mock = MagicMock()
         llm_mock.bind_tools.return_value = llm_mock
         with ExitStack() as stack:
-            stack.enter_context(patch('auditronclaw.core.approval.gate.audit_logger'))
+            stack.enter_context(patch('auditronclaw.core.logger._audit_logger'))
             self._create_app_with(stack, llm_mock, extra_tools=[fake_extra])
             bound = llm_mock.bind_tools.call_args[0][0]
             gated_extra = next(t for t in bound if t.name == "fake_extra")
@@ -471,7 +489,7 @@ class TestAssemblyPointWrapping(unittest.TestCase):
             args_schema=DynamicSkillInput, metadata={"skill_folder": "web_spider"})
 
         with ExitStack() as stack:
-            stack.enter_context(patch('auditronclaw.core.approval.gate.audit_logger'))
+            stack.enter_context(patch('auditronclaw.core.logger._audit_logger'))
             from auditronclaw.core.approval.gate import wrap_all_tools
             gated = wrap_all_tools([skill_tool], thread_id="assembly_test")[0]
 
@@ -485,7 +503,10 @@ class TestAssemblyPointWrapping(unittest.TestCase):
     def test_skill_loader_attaches_folder_metadata(self):
         """懒加载器给技能工具带 skill_folder 元数据(装配点判来源的依据)"""
         from auditronclaw.core.skill_loader import LazySkillLoader
-        loader = LazySkillLoader()
+        tmp = tempfile.mkdtemp(prefix="gate_loader_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        loader = LazySkillLoader(skills_dir=os.path.join(tmp, "office", "skills"),
+                                 office_dir=os.path.join(tmp, "office"))
         t = loader._create_lazy_tool({
             "folder": "web_spider", "md_path": "x/SKILL.md", "mtime": 0.0,
             "raw_name": "Web Spider", "name": "web_spider", "description": "d",
@@ -501,7 +522,7 @@ class TestAssemblyPointWrapping(unittest.TestCase):
         wrapped = wrap_all_tools([forged], thread_id="assembly_test",
                                  extra_names={"forged_tool"})
         self.assertFalse(wrapped[0] is forged, "自带标记不是已包装凭证,必须重包过门")
-        with patch('auditronclaw.core.approval.gate.audit_logger'):
+        with patch('auditronclaw.core.logger._audit_logger'):
             result = wrapped[0].invoke({})
         self.assertIn(REJECT_PHRASE, result, "伪造标记不得绕过门")
 
@@ -525,19 +546,18 @@ class TestUnattendedRejectionContinues(unittest.TestCase):
         ]
         with ExitStack() as stack:
             audit_mock = stack.enter_context(
-                patch('auditronclaw.core.approval.gate.audit_logger'))
-            # 钉死规则文件到空路径:装配点已接真实 matcher(02 票),
-            # 本测试断言的是无人拒,不得被开发机本地规则文件串扰
-            stack.enter_context(patch(
-                'auditronclaw.core.approval.rules.APPROVAL_RULES_FILE',
-                os.path.join(tempfile.mkdtemp(prefix="gate_unattended_"),
-                             "approval_rules.json")))
+                patch('auditronclaw.core.logger._audit_logger'))
+            # 规则文件钉死到临时工作区的空路径(05 票随 workspace 注入):
+            # 装配点已接真实 matcher(02 票),本测试断言的是无人拒,
+            # 不得被开发机本地规则文件串扰
+            cfg = _tmp_workspace(self)
             stack.enter_context(patch('auditronclaw.core.agent.get_provider',
                                       return_value=ScriptedLLM(script)))
             stack.enter_context(patch('auditronclaw.core.agent.load_dynamic_skills',
                                       return_value=[]))
             app = create_agent_app(
                 provider_name="fake", model_name="fake-model",
+                workspace=cfg,
                 checkpointer=MemorySaver(), thread_id="unattended_test")
             events = []
             async def run():
@@ -556,7 +576,7 @@ class TestUnattendedRejectionContinues(unittest.TestCase):
         self.assertTrue(events[-2].final)
         self.assertIsInstance(events[-1], TurnEnd)
         # 被拒调用确实未执行(危害不落地)
-        self.assertFalse(os.path.exists(os.path.join(OFFICE_DIR, "evil.py")),
+        self.assertFalse(os.path.exists(os.path.join(cfg.office_dir, "evil.py")),
                          "被拒的写操作不得落盘")
         # 审计成对:requested → decision(unattended)
         gate_events = [c.kwargs.get("event")
@@ -595,7 +615,7 @@ class TestAuditEventShapes(GateTestBase):
 
     def test_requested_and_decision_field_sets(self):
         """两事件字段集钉死:requested 带完整参数,decision 带决定与来源"""
-        gated = wrap_tool(write_office_file, thread_id="shape_test")
+        gated = wrap_tool(self.write_office_file, thread_id="shape_test")
         gated.invoke({"filepath": "a.py", "content": "x"})
         requested, decision = (c.kwargs for c in self.audit_mock.log_event.call_args_list)
         self.assertEqual(requested["event"], EVENT_APPROVAL_REQUESTED)

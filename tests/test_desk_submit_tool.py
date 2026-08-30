@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from helpers import FakeSender, InjectedSender
 
 from auditronclaw.core.tools import feishu_tool
+from auditronclaw.core.tools.desk_tool import create_desk_submit_tool
 
 
 # ============ 事务台结构化提交工具(function calling 方向定案)============
@@ -46,38 +47,34 @@ def _report_args(**overrides):
 
 
 class DeskToolTestCase(unittest.TestCase):
-    """公共底座:重定向任务文件 + 占位 webhook(真实值永不进断言输出)。"""
+    """公共底座:临时队列落点经工厂注入 + 占位 webhook(真实值永不进断言输出)。"""
 
     def setUp(self):
-        import auditronclaw.core.tools.builtins as builtins_mod
-
         fd, path = tempfile.mkstemp(suffix=".json")
         os.close(fd)
+        os.unlink(path)
         self.temp_path = path
-        self._orig_tasks_file = builtins_mod.TASKS_FILE
-        builtins_mod.TASKS_FILE = path
+        self.submit_tool = create_desk_submit_tool(path)
         self.secret_url = (
             f"https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN_{uuid.uuid4().hex[:12]}"
         )
 
     def tearDown(self):
-        import auditronclaw.core.tools.builtins as builtins_mod
-
-        builtins_mod.TASKS_FILE = self._orig_tasks_file
         if os.path.exists(self.temp_path):
             os.unlink(self.temp_path)
 
     def _submit(self, sender, args=None):
         """以注入 sender + 占位 webhook 跑一次提交,返回(回执, sender)。"""
-        from auditronclaw.core.tools.desk_tool import submit_mailbox_desk_report
         with InjectedSender(sender), patch(
             "auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url",
             return_value=self.secret_url,
         ):
-            result = submit_mailbox_desk_report.invoke(args or _report_args())
+            result = self.submit_tool.invoke(args or _report_args())
         return result, sender
 
     def _tasks_on_disk(self):
+        if not os.path.exists(self.temp_path):
+            return []
         with open(self.temp_path, encoding="utf-8") as f:
             content = f.read().strip()
         return json.loads(content) if content else []
@@ -182,9 +179,8 @@ class TestSubmitDeskReport(DeskToolTestCase):
         """内部异常兜底:结构化错误,不抛裸异常给 LLM,错误文案无凭据"""
         with patch("auditronclaw.core.tools.desk_tool.render_desk_report_text",
                    side_effect=RuntimeError(f"boom {self.secret_url}")):
-            from auditronclaw.core.tools.desk_tool import submit_mailbox_desk_report
             with InjectedSender(FakeSender()):
-                result = submit_mailbox_desk_report.invoke(_report_args())
+                result = self.submit_tool.invoke(_report_args())
         self.assertIn("失败", result)
         self.assertNotIn("TOKEN_", result)
 
@@ -193,8 +189,7 @@ class TestSubmitDeskReportShape(DeskToolTestCase):
     """工具形状:LLM 视角的参数面没有 URL/凭据字段;docstring 写明边界。"""
 
     def test_args_schema_is_structured_no_url_surface(self):
-        from auditronclaw.core.tools.desk_tool import submit_mailbox_desk_report
-        schema = submit_mailbox_desk_report.args_schema.model_json_schema()
+        schema = self.submit_tool.args_schema.model_json_schema()
         props = schema.get("properties", {})
         self.assertIn("todos", props)
         self.assertIn("needs_reply", props)
@@ -203,15 +198,17 @@ class TestSubmitDeskReportShape(DeskToolTestCase):
         self.assertEqual(set(props) & forbidden, set())
 
     def test_docstring_documents_boundary_and_rules(self):
-        from auditronclaw.core.tools.desk_tool import submit_mailbox_desk_report
-        doc = submit_mailbox_desk_report.description
+        doc = self.submit_tool.description
         self.assertIn("域名", doc)
         self.assertIn("正交", doc, "docstring 要带分类规则(待办跨类别正交维度)")
         self.assertIn("空收件箱", doc, "docstring 要钉死空窗口同样提交(每日存活信号)")
 
     def test_registered_in_builtins(self):
-        from auditronclaw.core.tools.builtins import BUILTIN_TOOLS
-        names = {t.name for t in BUILTIN_TOOLS}
+        from auditronclaw.core.config import WorkspaceConfig
+        from auditronclaw.core.tools.builtins import build_builtin_tools
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = WorkspaceConfig.from_root(tmp)
+            names = {t.name for t in build_builtin_tools(cfg, "shape_probe")}
         self.assertIn("submit_mailbox_desk_report", names)
 
 
@@ -219,10 +216,10 @@ class TestCredentialNeverReachesAuditFile(DeskToolTestCase):
     """凭据纪律落盘级验证:提交一轮后,审计 jsonl 全文不含 webhook URL。"""
 
     def test_audit_file_clean_after_submit(self):
-        from auditronclaw.core.logger import audit_logger
+        from auditronclaw.core.logger import get_audit_logger
         self._submit(FakeSender())
-        audit_logger.log_queue.join()
-        with open(os.path.join(audit_logger.log_dir, "system.jsonl"), encoding="utf-8") as f:
+        get_audit_logger().log_queue.join()
+        with open(os.path.join(get_audit_logger().log_dir, "system.jsonl"), encoding="utf-8") as f:
             full_text = f.read()
         self.assertNotIn(self.secret_url, full_text)
         self.assertIn("事务台", full_text, "提交必须留可检索的审计事件")

@@ -3,7 +3,6 @@ import json
 import asyncio
 import calendar
 from datetime import datetime, timedelta
-from .config import TASKS_FILE
 from .tools.builtins import (
     TASK_TIME_FORMAT,
     _validated_tasks,
@@ -38,14 +37,17 @@ def _next_occurrence(target_dt: datetime, repeat: str) -> datetime:
     return target_dt.replace(year=year, month=month, day=day)
 
 
-async def pacemaker_loop(task_queue: asyncio.Queue, check_interval: int = 10):
+async def pacemaker_loop(task_queue: asyncio.Queue, tasks_file: str, check_interval: int = 10):
     """
-    后台心脏起搏器协程（带并发锁和循环任务续期功能）
+    后台心脏起搏器协程（带并发锁和循环任务续期功能）。
+
+    队列落点(tasks_file)为装配期入参（05 票）：与任务工具同一文件由
+    入口装配时传入，本模块不持有路径常量。
     """
     while True:
         await asyncio.sleep(check_interval)
 
-        if not os.path.exists(TASKS_FILE):
+        if not os.path.exists(tasks_file):
             continue
 
         now = datetime.now()
@@ -55,7 +57,7 @@ async def pacemaker_loop(task_queue: asyncio.Queue, check_interval: int = 10):
         #线程锁，防止多线程/多协程同时读写任务文件导致的竞争条件和数据损坏
         with tasks_lock:
             try:
-                with open(TASKS_FILE, "r", encoding="utf-8") as f:
+                with open(tasks_file, "r", encoding="utf-8") as f:
                     content = f.read().strip()
                     if not content:
                         continue
@@ -97,7 +99,7 @@ async def pacemaker_loop(task_queue: asyncio.Queue, check_interval: int = 10):
             #经 model_dump 走 _write_tasks 原子替换
             if triggered_tasks or dropped_invalid:
                 try:
-                    _write_tasks([t.model_dump() for t in pending_tasks])
+                    _write_tasks([t.model_dump() for t in pending_tasks], tasks_file)
                 except Exception:
                     pass
 

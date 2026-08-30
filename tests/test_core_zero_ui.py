@@ -13,6 +13,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from contextlib import ExitStack
 from pathlib import Path
@@ -61,7 +62,7 @@ def _enter_fake_patches(stack, llm):
     """
     for p in (
         patch('auditronclaw.core.agent.get_provider', return_value=llm),
-        patch('auditronclaw.core.agent.BUILTIN_TOOLS', [fake_probe]),
+        patch('auditronclaw.core.agent.build_builtin_tools', return_value=[fake_probe]),
         patch('auditronclaw.core.agent.load_dynamic_skills', return_value=[]),
         # 强裁剪:让本回合就产生 discarded_msgs(不必真攒 40 回合)
         patch('auditronclaw.core.agent.trim_context_messages',
@@ -114,10 +115,14 @@ class TestTrimEmitsSystemAction(unittest.TestCase):
             llm = ScriptedLLM([AIMessage(content="交接摘要"), AIMessage(content="收尾回复")])
             _enter_fake_patches(stack, llm)
             logger_mock = stack.enter_context(
-                patch('auditronclaw.core.agent.audit_logger'))
+                patch('auditronclaw.core.logger._audit_logger'))
+            from auditronclaw.core.config import WorkspaceConfig
+            workspace = WorkspaceConfig.from_root(tempfile.mkdtemp(prefix="zero_ui_ws_"))
+            workspace.ensure_dirs()
             app = create_agent_app(
                 provider_name="fake",
                 model_name="fake-model",
+                workspace=workspace,
                 checkpointer=MemorySaver(),
                 thread_id=THREAD_ID,
             )

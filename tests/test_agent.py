@@ -1,12 +1,23 @@
 import unittest
 import os
+import shutil
 import sys
+import tempfile
 from unittest.mock import Mock, patch, MagicMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from auditronclaw.core.config import WorkspaceConfig
 from auditronclaw.core.context import AgentState
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+
+
+def _tmp_workspace(testcase):
+    """临时工作区(05 票):装配点吃显式 workspace,测试自建临时根。"""
+    workspace = WorkspaceConfig.from_root(tempfile.mkdtemp(prefix="agent_test_"))
+    workspace.ensure_dirs()
+    testcase.addCleanup(shutil.rmtree, workspace.root, ignore_errors=True)
+    return workspace
 
 
 class TestAgent(unittest.TestCase):
@@ -25,8 +36,8 @@ class TestAgent(unittest.TestCase):
 
     @patch('auditronclaw.core.agent.get_provider')
     @patch('auditronclaw.core.agent.load_dynamic_skills')
-    @patch('auditronclaw.core.agent.BUILTIN_TOOLS', [])
-    def test_create_agent_app_basic(self, mock_load_skills, mock_get_provider):
+    @patch('auditronclaw.core.agent.build_builtin_tools', return_value=[])
+    def test_create_agent_app_basic(self, mock_build, mock_load_skills, mock_get_provider):
         """测试创建基础代理应用（带 Mock）"""
         from auditronclaw.core.agent import create_agent_app
 
@@ -39,7 +50,8 @@ class TestAgent(unittest.TestCase):
         mock_load_skills.return_value = []
 
         try:
-            app = create_agent_app(provider_name="openai", model_name="gpt-4o-mini")
+            app = create_agent_app(provider_name="openai", model_name="gpt-4o-mini",
+                                   workspace=_tmp_workspace(self))
             self.assertIsNotNone(app)
         except Exception as e:
             # 即使出现其他错误也记录
@@ -48,8 +60,8 @@ class TestAgent(unittest.TestCase):
 
     @patch('auditronclaw.core.agent.get_provider')
     @patch('auditronclaw.core.agent.load_dynamic_skills')
-    @patch('auditronclaw.core.agent.BUILTIN_TOOLS', [])
-    def test_create_agent_app_with_custom_tools(self, mock_load_skills, mock_get_provider):
+    @patch('auditronclaw.core.agent.build_builtin_tools', return_value=[])
+    def test_create_agent_app_with_custom_tools(self, mock_build, mock_load_skills, mock_get_provider):
         """测试创建带有自定义工具的代理应用（带 Mock）"""
         from auditronclaw.core.agent import create_agent_app
         from langchain_core.tools import tool
@@ -72,6 +84,7 @@ class TestAgent(unittest.TestCase):
             app = create_agent_app(
                 provider_name="openai",
                 model_name="gpt-4o-mini",
+                workspace=_tmp_workspace(self),
                 tools=[mock_tool]
             )
             self.assertIsNotNone(app)
@@ -94,7 +107,8 @@ class TestAgent(unittest.TestCase):
             """extra tool"""
             return x
 
-        with patch('auditronclaw.core.agent.BUILTIN_TOOLS', [fake_builtin]), \
+        with patch('auditronclaw.core.agent.build_builtin_tools',
+                   return_value=[fake_builtin]), \
              patch('auditronclaw.core.agent.load_dynamic_skills', return_value=[]), \
              patch('auditronclaw.core.agent.get_provider') as mock_get_provider:
             mock_provider = Mock()
@@ -103,6 +117,7 @@ class TestAgent(unittest.TestCase):
 
             create_agent_app(
                 provider_name="openai", model_name="test-model",
+                workspace=_tmp_workspace(self),
                 extra_tools=[extra_one]
             )
 
@@ -121,7 +136,8 @@ class TestAgent(unittest.TestCase):
         extra_dup = StructuredTool.from_function(
             func=lambda x: x, name="dup_name", description="extra version")
 
-        with patch('auditronclaw.core.agent.BUILTIN_TOOLS', [builtin_dup]), \
+        with patch('auditronclaw.core.agent.build_builtin_tools',
+                   return_value=[builtin_dup]), \
              patch('auditronclaw.core.agent.load_dynamic_skills', return_value=[]), \
              patch('auditronclaw.core.agent.get_provider') as mock_get_provider:
             mock_provider = Mock()
@@ -130,6 +146,7 @@ class TestAgent(unittest.TestCase):
 
             create_agent_app(
                 provider_name="openai", model_name="test-model",
+                workspace=_tmp_workspace(self),
                 extra_tools=[extra_dup]
             )
 
@@ -140,8 +157,8 @@ class TestAgent(unittest.TestCase):
 
     @patch('auditronclaw.core.agent.get_provider')
     @patch('auditronclaw.core.agent.load_dynamic_skills')
-    @patch('auditronclaw.core.agent.BUILTIN_TOOLS', [])
-    def test_create_agent_app_with_checkpointer(self, mock_load_skills, mock_get_provider):
+    @patch('auditronclaw.core.agent.build_builtin_tools', return_value=[])
+    def test_create_agent_app_with_checkpointer(self, mock_build, mock_load_skills, mock_get_provider):
         """测试创建带有检查点的代理应用（带 Mock）"""
         from auditronclaw.core.agent import create_agent_app
         from langgraph.checkpoint.memory import MemorySaver
@@ -159,6 +176,7 @@ class TestAgent(unittest.TestCase):
             app = create_agent_app(
                 provider_name="openai",
                 model_name="gpt-4o-mini",
+                workspace=_tmp_workspace(self),
                 checkpointer=memory_saver
             )
             self.assertIsNotNone(app)
