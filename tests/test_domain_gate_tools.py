@@ -170,7 +170,7 @@ class TestSendFeishuSummaryToolShape(unittest.TestCase):
     """工具形状：LLM 视角的参数面里没有 URL/凭据字段。"""
 
     def test_tool_args_have_no_url_field(self):
-        """工具参数 schema 不含 URL/sender 暴露面（sender 是模块内注入缝，不对 LLM 开放）"""
+        """工具参数 schema 不含 URL/sender 暴露面（sender 是模块内注入点，不对 LLM 开放）"""
         schema = send_feishu_summary.args_schema.model_json_schema()
         props = schema.get("properties", {})
         self.assertIn("summary_text", props)

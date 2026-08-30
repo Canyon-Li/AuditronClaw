@@ -2,7 +2,7 @@
 
 分层(沿用仓库测试纪律):
 - 纯函数单测:classify_tool_call / classify_shell_command(每类副作用命中+不命中)
-- 真实组件行为测试:门包装(包装工具的 invoke 即缝,审计经 audit_logger 观察)
+- 真实组件行为测试:门包装(包装工具的 invoke 即注入点,审计经 audit_logger 观察)
 - 假 LLM 驱动引擎测试:无人形态拒绝并继续(先例:test_session_engine 脚本化回复)
 
 词汇见 CONTEXT.md「副作用分级/审批门/审批规则」。
@@ -235,7 +235,7 @@ class TestClassifierProvenance(unittest.TestCase):
         self.assertEqual(assess.risk_class, RISK_READ)
 
 
-# ============ 门包装:包装工具的 invoke 即缝(分级→规则→问人固定链) ============
+# ============ 门包装:包装工具的 invoke 即注入点(分级→规则→问人固定链) ============
 
 from unittest.mock import MagicMock, patch
 
@@ -255,7 +255,7 @@ from auditronclaw.core.tools.builtins import write_office_file
 
 
 class GateTestBase(unittest.TestCase):
-    """门测试公共件:假化 gate 模块的审计出口(观察缝),真工具真包装。"""
+    """门测试公共件:假化 gate 模块的审计出口(观察点),真工具真包装。"""
 
     def setUp(self):
         _patcher = patch('auditronclaw.core.approval.gate.audit_logger')
@@ -309,7 +309,7 @@ class TestGateWrapper(GateTestBase):
         self.assertEqual(decision["risk_class"], "write", "决定事件携带原分级,不被规则改写")
 
     def test_rule_match_passes_with_rule_auto_source(self):
-        """规则命中:放行且决定事件 source=rule_auto(02 票接线,缝先钉死)"""
+        """规则命中:放行且决定事件 source=rule_auto(02 票接线,注入点先钉死)"""
         calls = []
         rule_matcher = MagicMock(return_value={"id": "r1"})
         gated = wrap_tool(_spy_tool(write_office_file, calls),
@@ -344,14 +344,14 @@ class TestGateWrapper(GateTestBase):
         self.assertEqual(requested["risk_class"], "write")
 
     def test_optional_fields_omitted_still_execute(self):
-        """可选字段缺省不炸(06 票 golden 实测暴露的包装回归):
+        """可选字段缺省不报错(06 票 golden 实测暴露的包装回归):
 
         双层校验问题——外层包装的 pydantic 透传会把"可选字段默认值"展开成
         显式 None 传进门,内层 tool.invoke 再校验时 pydantic 对 str 字段的
         显式 None 直接抛 ValidationError(默认值只容许缺席,不容显式 null)。
         无门时 ToolNode 单层校验、函数默认参收 None 相安无事;门必须把内层
         调用还原成同一形态。回归样本:modify_scheduled_task 只传
-        task_id+new_time 时 new_description 被 None 展开炸掉
+        task_id+new_time 时 new_description 被 None 展开后崩溃
         (gold_task_003 ✅→✗,经审计轨迹定责)。"""
         received = {}
 

@@ -246,7 +246,7 @@ class RuleStore:
 
 
 def make_rule_matcher(store: RuleStore):
-    """门缝适配器:gate 的 RuleMatcher 契约 → 规则匹配。
+    """门侧适配器:gate 的 RuleMatcher 契约 → 规则匹配。
 
     契约(见 gate.py):rule_matcher(tool_name, args, assessment) ->
     命中的规则或 None。匹配只依赖分级结果(级别 + 目标作用域),工具名与

@@ -81,7 +81,7 @@ class JSONLEventLogger:
                 self._write_item(log_item)
             except Exception as e:
                 # 兜底也失败：磁盘连日志目录都写不进属灾难场景，打印是诚实极限。
-                # 循环必须活着——写线程炸了，后续事件连被兜底的资格都没有
+                # 循环必须活着——写线程崩溃了，后续事件连被兜底的资格都没有
                 print(f"[Logger Error] 主写与兜底均失败,事件丢弃: {e}")
             finally:
                 self.log_queue.task_done()
