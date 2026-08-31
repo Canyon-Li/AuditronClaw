@@ -1,0 +1,228 @@
+{
+  "description": "改造前分级快照：签名 (工具, 固定样例参数, 域名门分支) → (级别, targets)",
+  "notes": "技能与外接工具设计上 unclassified（fail-closed 默认必批），不拍分级快照。",
+  "entries": [
+    {
+      "tool": "get_current_time",
+      "args": {},
+      "domain_gate": "default",
+      "risk_class": "read",
+      "targets": []
+    },
+    {
+      "tool": "calculator",
+      "args": {
+        "expression": "2**10"
+      },
+      "domain_gate": "default",
+      "risk_class": "read",
+      "targets": []
+    },
+    {
+      "tool": "save_user_profile",
+      "args": {
+        "new_content": "用户偏好:回复保持简洁"
+      },
+      "domain_gate": "default",
+      "risk_class": "write",
+      "targets": [
+        "memory/profiles"
+      ]
+    },
+    {
+      "tool": "list_office_files",
+      "args": {
+        "sub_dir": "notes"
+      },
+      "domain_gate": "default",
+      "risk_class": "read",
+      "targets": []
+    },
+    {
+      "tool": "read_office_file",
+      "args": {
+        "filepath": "notes/a.txt"
+      },
+      "domain_gate": "default",
+      "risk_class": "read",
+      "targets": []
+    },
+    {
+      "tool": "write_office_file",
+      "args": {
+        "filepath": "notes/a.txt",
+        "content": "hello",
+        "mode": "w"
+      },
+      "domain_gate": "default",
+      "risk_class": "write",
+      "targets": [
+        "office/notes/a.txt"
+      ]
+    },
+    {
+      "tool": "get_system_model_info",
+      "args": {},
+      "domain_gate": "default",
+      "risk_class": "read",
+      "targets": []
+    },
+    {
+      "tool": "list_scheduled_tasks",
+      "args": {},
+      "domain_gate": "default",
+      "risk_class": "read",
+      "targets": []
+    },
+    {
+      "tool": "schedule_task",
+      "args": {
+        "target_time": "2027-01-01 08:00:00",
+        "description": "发日报",
+        "repeat": "daily",
+        "repeat_count": 3
+      },
+      "domain_gate": "default",
+      "risk_class": "write",
+      "targets": [
+        "tasks.json"
+      ]
+    },
+    {
+      "tool": "modify_scheduled_task",
+      "args": {
+        "task_id": "abc12345",
+        "new_description": "发周报"
+      },
+      "domain_gate": "default",
+      "risk_class": "write",
+      "targets": [
+        "tasks.json"
+      ]
+    },
+    {
+      "tool": "delete_scheduled_task",
+      "args": {
+        "task_id": "abc12345"
+      },
+      "domain_gate": "default",
+      "risk_class": "delete",
+      "targets": [
+        "tasks.json"
+      ]
+    },
+    {
+      "tool": "submit_mailbox_desk_report",
+      "args": {
+        "window_hours": 24,
+        "total_mails": 5,
+        "todos": [
+          "回复张三的报价邮件"
+        ],
+        "needs_reply": [],
+        "notices": [],
+        "ignorable_count": 0
+      },
+      "domain_gate": "default",
+      "risk_class": "write",
+      "targets": [
+        "tasks.json"
+      ]
+    },
+    {
+      "tool": "send_feishu_summary",
+      "args": {
+        "summary_text": "今日共 5 封邮件，待办 1 项"
+      },
+      "domain_gate": "bound_domain_removed",
+      "risk_class": "domain_extend",
+      "targets": [
+        "open.feishu.cn"
+      ]
+    },
+    {
+      "tool": "send_feishu_summary",
+      "args": {
+        "summary_text": "今日共 5 封邮件，待办 1 项"
+      },
+      "domain_gate": "default",
+      "risk_class": "read",
+      "targets": []
+    },
+    {
+      "tool": "read_recent_emails",
+      "args": {
+        "hours": 24,
+        "max_emails": 10
+      },
+      "domain_gate": "bound_domain_removed",
+      "risk_class": "domain_extend",
+      "targets": [
+        "imap.qq.com"
+      ]
+    },
+    {
+      "tool": "read_recent_emails",
+      "args": {
+        "hours": 24,
+        "max_emails": 10
+      },
+      "domain_gate": "default",
+      "risk_class": "read",
+      "targets": []
+    },
+    {
+      "tool": "execute_office_shell",
+      "args": {
+        "command": "ls && cat notes/a.txt"
+      },
+      "domain_gate": "default",
+      "risk_class": "read",
+      "targets": []
+    },
+    {
+      "tool": "execute_office_shell",
+      "args": {
+        "command": "python scripts/run.py"
+      },
+      "domain_gate": "default",
+      "risk_class": "execute",
+      "targets": [
+        "office/scripts/run.py"
+      ]
+    },
+    {
+      "tool": "execute_office_shell",
+      "args": {
+        "command": "echo hi > out.txt"
+      },
+      "domain_gate": "default",
+      "risk_class": "execute",
+      "targets": [
+        "office/out.txt"
+      ]
+    },
+    {
+      "tool": "execute_office_shell",
+      "args": {
+        "command": "mkdir reports"
+      },
+      "domain_gate": "default",
+      "risk_class": "write",
+      "targets": [
+        "office/reports"
+      ]
+    },
+    {
+      "tool": "execute_office_shell",
+      "args": {
+        "command": "cat a.txt && rm old.txt"
+      },
+      "domain_gate": "default",
+      "risk_class": "delete",
+      "targets": [
+        "office/old.txt"
+      ]
+    }
+  ]
+}
