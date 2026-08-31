@@ -18,7 +18,7 @@
 from dataclasses import dataclass
 from enum import Enum
 from time import monotonic
-from typing import Any, Callable, FrozenSet, List, Optional, Sequence
+from typing import Any, Callable, FrozenSet, List, Mapping, Optional, Sequence
 
 from langchain_core.runnables import ensure_config
 from langchain_core.tools import BaseTool, StructuredTool
@@ -248,12 +248,15 @@ def wrap_tool(
     thread_id: str,
     provenance: Provenance = Provenance.BUILTIN,
     skill_folder: str = "",
+    static_risk: Optional[Mapping[str, str]] = None,
     rule_matcher: Optional[RuleMatcher] = None,
     rule_store=None,
     hooks: Sequence[ToolHook] = (),
 ) -> StructuredTool:
     """给单个工具包上门:同名同 schema,调用先过 分级→规则→问人 链。
 
+    static_risk 是 builtin 判定用的静态名册(装配点构造的合并册,ADR-002
+    裁定四);缺省回落 core 静态册。skills / extras / shell 判定不涉册。
     hooks(03 票)是观察点:before 见每次经门调用的尝试,after/on_error 只
     见工具体执行段——hooks 只观察与记录,无否决权。无 hooks 时行为不变。
     工具体抛 DomainDenied 时,由本 wrapper 统一格式落拒绝回执并返回拒绝
@@ -304,7 +307,8 @@ def wrap_tool(
     def _new_call(kwargs: dict, config: dict) -> ToolCallContext:
         """分级 + 组装观察上下文(hooks 的只读面)。"""
         assessment = classify_tool_call(
-            tool.name, kwargs, provenance=provenance, skill_folder=skill_folder)
+            tool.name, kwargs, provenance=provenance, skill_folder=skill_folder,
+            static_risk=static_risk)
         return ToolCallContext(
             tool=tool.name, args=kwargs, origin=_turn_origin(config),
             risk=assessment, started=monotonic())
@@ -374,6 +378,7 @@ def wrap_all_tools(
     *,
     thread_id: str,
     extra_names: FrozenSet[str] = frozenset(),
+    static_risk: Optional[Mapping[str, str]] = None,
     rule_matcher: Optional[RuleMatcher] = None,
     rule_store=None,
     hooks: Sequence[ToolHook] = (),
@@ -384,6 +389,7 @@ def wrap_all_tools(
     skill(按命令收敛);其余 → builtin(查副作用册)。
     不做"已包装"短路:包装标记写在工具元数据里,而元数据来自被守对象
     (外接工具可自带任意元数据),守门判定不能握在被守者手里。
+    static_risk 原样传给每个包装件(同一份合并册盖全部 builtin 判定);
     hooks 原样传给每个包装件(同一观察点盖全部注册工具)。
     """
     wrapped: List[BaseTool] = []
@@ -397,6 +403,7 @@ def wrap_all_tools(
             provenance = Provenance.BUILTIN
         wrapped.append(wrap_tool(
             t, thread_id=thread_id, provenance=provenance,
-            skill_folder=folder, rule_matcher=rule_matcher,
+            skill_folder=folder, static_risk=static_risk,
+            rule_matcher=rule_matcher,
             rule_store=rule_store, hooks=hooks))
     return wrapped

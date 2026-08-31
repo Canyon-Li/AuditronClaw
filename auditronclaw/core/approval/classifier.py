@@ -5,7 +5,9 @@
 命令或重定向即整条必批。分级结果是规则匹配的输入:规则只能豁免对应级别
 的动作,改变不了分级本身。
 
-新工具入册即加映射:内置工具名查册;未入册(unclassified)默认必批,不猜。
+新工具入册即加映射:内置工具名查册(域自报的静态分级经 roster.build_static_risk
+装配期合并注入,core 三集是 core 静态册的存储形态);未入册(unclassified)
+默认必批,不猜。
 """
 from dataclasses import dataclass
 from enum import Enum
@@ -63,6 +65,11 @@ class RiskAssessment:
 
 # ============ 工具册(新工具入册即加映射) ============
 
+# core 静态册的存储形态:三个级别集(纯读 6 / 写 5 / 删 1,共 12 名存量,
+# 旧域原地)。域自报的静态分级不在 core 加行——装配点经 roster.build_static_risk
+# 与本册合并成 frozen 名册注入门(ADR-002 裁定四);三集同时是既有测试
+# 的 patch 注入点。
+
 # 纯读工具:参数面无副作用
 _PURE_READ_TOOLS = frozenset({
     "get_current_time",
@@ -95,6 +102,18 @@ _DELETE_TOOLS = frozenset({"delete_scheduled_task"})
 # shell 工具:命令段级判定
 _SHELL_TOOLS = frozenset({"execute_office_shell"})
 
+
+def _core_static_risk() -> dict:
+    """core 静态册的查表形态:名 → 静态级别(read/write/delete)。
+
+    调用时从三集构造(不缓存):三集是存储形态也是 patch 注入点,当刻内容
+    即当刻 core 册。域自报的合并不在此处——装配点用 roster.build_static_risk。
+    """
+    merged = {name: RISK_READ for name in _PURE_READ_TOOLS}
+    merged.update((name, RISK_WRITE) for name in _WRITE_TOOLS)
+    merged.update((name, RISK_DELETE) for name in _DELETE_TOOLS)
+    return merged
+
 # 工具注册来源(provenance):装配点在包装时告知每个工具从哪来,分级按来源
 # 走不同路径。枚举风格与 gate.DecisionSource 同构
 class Provenance(str, Enum):
@@ -115,10 +134,13 @@ def classify_tool_call(
     *,
     provenance: Provenance | str = Provenance.BUILTIN,
     skill_folder: str = "",
+    static_risk: "Mapping[str, str] | None" = None,
 ) -> RiskAssessment:
     """对一次工具调用做副作用分级(纯判定,不执行任何操作)。
 
-    - builtin:按工具名查册;未入册 → unclassified 必批
+    - builtin:按工具名查册——判定只认 static_risk 传入的名册;缺省回落
+      core 静态册(装配点注入的合并册见 roster.build_static_risk);
+      未入册 → unclassified 必批
     - extra:外接工具一律 unclassified 必批(它不经命令白名单与路径防护)
     - skill:mode=help 纯读;mode=run 按其最终交给 execute_office_shell 的
       命令段级判定(与 shell 工具同源,{baseDir} 同规则替换)
@@ -128,7 +150,9 @@ def classify_tool_call(
                        "外接工具未入副作用册,默认必批(不经命令白名单与路径防护)")
     if provenance == Provenance.SKILL:
         return _classify_skill_call(tool_name, args, skill_folder)
-    return _classify_builtin_call(tool_name, args)
+    return _classify_builtin_call(
+        tool_name, args,
+        static_risk if static_risk is not None else _core_static_risk())
 
 
 def _classify_skill_call(tool_name: str, args: Mapping, skill_folder: str) -> RiskAssessment:
@@ -162,18 +186,40 @@ def _office_target(rel: str) -> str:
     return "office/" + cleaned if cleaned else "office"
 
 
+# core 写类里目标作用域静态可判定的工具(schedule/modify/submit 三者的
+# 写面就是任务队列落盘部);域自报写类不在此列
+_TASKS_JSON_WRITE_TOOLS = frozenset({
+    "schedule_task", "modify_scheduled_task", "submit_mailbox_desk_report",
+})
+
+
 def _write_targets(tool_name: str, args: Mapping) -> tuple:
-    """写类调用的目标作用域(与 _write_target 同一判定分支)。"""
+    """写类调用的目标作用域(与 _write_target 同一判定分支)。
+
+    core 写类逐一静态可判;域自报写类契约不含目标自报(DomainRegistration
+    只有级别槽),提不出可信目标即空元组——规则无从豁免,fail-closed。
+    """
     if tool_name == "write_office_file":
         # filepath 缺失是 schema 违规,工具自身报错;提不出目标则规则不豁免
         return (_office_target(str(args["filepath"])),) if args.get("filepath") else ()
     if tool_name == "save_user_profile":
         return ("memory/profiles",)  # 画像区目录(会话内具体文件由工具自析)
-    return ("tasks.json",)           # 任务队列落盘部(schedule/modify/submit)
+    if tool_name in _TASKS_JSON_WRITE_TOOLS:
+        return ("tasks.json",)       # 任务队列落盘部(schedule/modify/submit)
+    return ()                        # 域自报写类:提不出可信目标,不猜
 
 
-def _classify_builtin_call(tool_name: str, args: Mapping) -> RiskAssessment:
-    if tool_name in _PURE_READ_TOOLS:
+def _classify_builtin_call(tool_name: str, args: Mapping,
+                           static_risk: "Mapping[str, str]") -> RiskAssessment:
+    """builtin 判定:查传入的静态名册(带册,不直读模块集合——ADR-002 裁定四)。"""
+    # shell 段级判定不涉册、册遮蔽不了它:分支先于名册查表——域自报
+    # shell 工具名的"静态级别"装配期拒(roster),判定期此处兜底
+    if tool_name in _SHELL_TOOLS:
+        return classify_shell_command(tool_name, str(args.get("command", "")))
+
+    category = static_risk.get(tool_name)
+
+    if category == RISK_READ:
         return _assess(tool_name, RISK_READ, "纯读工具,无副作用")
 
     if tool_name in _BOUND_DOMAIN_TOOLS:
@@ -185,18 +231,18 @@ def _classify_builtin_call(tool_name: str, args: Mapping) -> RiskAssessment:
                        f"绑定域名 {domain} 不在白名单内,属白名单扩展流程",
                        targets=(domain,))
 
-    if tool_name in _WRITE_TOOLS:
+    if category == RISK_WRITE:
         return _assess(tool_name, RISK_WRITE,
                        f"写类副作用(目标:{_write_target(args)})",
                        targets=_write_targets(tool_name, args))
 
-    if tool_name in _DELETE_TOOLS:
-        return _assess(tool_name, RISK_DELETE,
-                       f"不可逆删除(目标:{args.get('task_id', '未知')})",
-                       targets=("tasks.json",))
-
-    if tool_name in _SHELL_TOOLS:
-        return classify_shell_command(tool_name, str(args.get("command", "")))
+    if category == RISK_DELETE:
+        if tool_name == "delete_scheduled_task":
+            return _assess(tool_name, RISK_DELETE,
+                           f"不可逆删除(目标:{args.get('task_id', '未知')})",
+                           targets=("tasks.json",))
+        # 域自报删类:目标作用域契约不自报,提不出即空(规则无从豁免)
+        return _assess(tool_name, RISK_DELETE, "不可逆删除")
 
     return _assess(tool_name, RISK_UNCLASSIFIED, "工具未入副作用册,默认必批")
 
