@@ -8,6 +8,8 @@ select = ["E4", "E7", "E9", "F"]
 
 [lint.per-file-ignores]
 # 测试文件按章节就地 import（贴近使用处）、bench_pipeline 先 sys.path
-# 引导再 import——E402 是这两种既定形态的固有告警，豁免而非清改
+# 引导再 import——E402 是这两种既定形态的固有告警，豁免而非清改。
+# 根级 conftest 同理（先 sys.path 引导再 import 包，豁免随文件从 tests/ 提根）
 "tests/**" = ["E402"]
+"conftest.py" = ["E402"]
 "benchmarks/bench_pipeline.py" = ["E402"]

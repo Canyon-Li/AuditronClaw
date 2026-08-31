@@ -1,0 +1,21 @@
+{
+  "description": "改造前默认装配工具集合（build_builtin_tools 产物，装配顺序）",
+  "notes": "默认装配不含技能与外接工具：前者随工作区内容装配（默认为空），后者由调用方注入。集合等值检查的覆盖边界与此一致。",
+  "tools": [
+    "get_current_time",
+    "calculator",
+    "save_user_profile",
+    "list_office_files",
+    "read_office_file",
+    "write_office_file",
+    "execute_office_shell",
+    "get_system_model_info",
+    "schedule_task",
+    "list_scheduled_tasks",
+    "delete_scheduled_task",
+    "modify_scheduled_task",
+    "send_feishu_summary",
+    "read_recent_emails",
+    "submit_mailbox_desk_report"
+  ]
+}

@@ -1,5 +1,9 @@
 """测试进程级生产通道哨兵（03 票起遍历出站通道注册表）。
 
+放在仓库根而非 tests/ 下（域模板 ADR-002）：pytest 全量收集 tests/ 与
+auditronclaw/domains/（testpaths 钉在 pytest.ini），根级 conftest 对两处
+测试同样生效——域目录测试同受出站哨兵保护，不用每处复制布哨。
+
 零真实网络是测试套件的结构性纪律：任何测试真实触碰出站通道，当条测试
 即红——不赌写测试的人每次都记得注入假件。发现路径：2026-08-24
 test_bench_pipeline 的"退出探针"在本地 .env 存在时（bench_pipeline 导入即
@@ -20,7 +24,7 @@ import sys
 
 import pytest
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # 导入即登记：注册表条目挂在传输定义模块上
 from auditronclaw.core.tools import feishu_tool, mail_tool  # noqa: F401

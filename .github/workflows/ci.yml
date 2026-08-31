@@ -25,10 +25,11 @@ jobs:
           pip install pytest
 
       # 豁免项与本地跑法逐字一致,原因:
-      # test_no_tasks_file 挂在 Windows 文件锁,保持本地/CI 跑法一致
+      # test_no_tasks_file 挂在 Windows 文件锁,保持本地/CI 跑法一致。
+      # 不带路径参数:收集范围(含域目录 auditronclaw/domains)钉在 pytest.ini
       - name: 跑全量测试(含红队用例)
         run: >-
-          pytest tests/
+          pytest
           --deselect "tests/test_heartbeat.py::TestHeartbeatPacemaker::test_no_tasks_file"
 
       # lint/type-check 基线(F7):规则集与检查范围钉在仓库配置里
