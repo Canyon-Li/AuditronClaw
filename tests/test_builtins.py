@@ -4,7 +4,7 @@ import shutil
 import sys
 import tempfile
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -155,7 +155,8 @@ class TestScheduledTasks(_TaskToolsHarness):
                       if datetime.now().hour >= 9 else
                       datetime.now().replace(hour=9, minute=0, second=0))
         if future_time <= datetime.now():
-            future_time = future_time.replace(day=future_time.day + 1)
+            # 跨月安全的一天:月末当天 replace(day=day+1) 会造出不存在的日子
+            future_time = future_time + timedelta(days=1)
 
         target_time = future_time.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -234,7 +235,8 @@ class TestScheduledTasksWithTasks(_TaskToolsHarness):
                       if datetime.now().hour >= 9 else
                       datetime.now().replace(hour=9, minute=0, second=0))
         if future_time <= datetime.now():
-            future_time = future_time.replace(day=future_time.day + 1)
+            # 跨月安全的一天:月末当天 replace(day=day+1) 会造出不存在的日子
+            future_time = future_time + timedelta(days=1)
 
         target_time = future_time.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -286,7 +288,8 @@ class TestScheduledTasksWithTasks(_TaskToolsHarness):
                    if datetime.now().hour >= 10 else
                    datetime.now().replace(hour=10, minute=0, second=0))
         if new_time <= datetime.now():
-            new_time = new_time.replace(day=new_time.day + 1)
+            # 跨月安全的一天(同上,replace(day=+1) 在月末会红)
+            new_time = new_time + timedelta(days=1)
 
         new_target_time = new_time.strftime("%Y-%m-%d %H:%M:%S")
 
