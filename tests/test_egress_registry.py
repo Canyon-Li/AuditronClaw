@@ -16,7 +16,8 @@ import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from auditronclaw.core.tools import egress, feishu_tool, mail_tool
+from auditronclaw.core.tools import egress, mail_tool
+from auditronclaw.domains.feishu import tool as feishu_tool
 
 # 包根（meta-test 的扫描范围：出站通道都在包内定义；entry/benchmarks 不定义通道）
 PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'auditronclaw'))

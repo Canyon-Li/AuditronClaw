@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from helpers import FakeSender, InjectedSender
 
+from auditronclaw.domains.feishu import tool as feishu_tool
 from auditronclaw.core.tools.desk_tool import create_desk_submit_tool
 
 
@@ -53,7 +54,9 @@ class DeskToolTestCase(unittest.TestCase):
         os.close(fd)
         os.unlink(path)
         self.temp_path = path
-        self.submit_tool = create_desk_submit_tool(path)
+        # 03 票起推送核心路径经装配注入(core 不 import 域,测试同款接线)
+        self.submit_tool = create_desk_submit_tool(
+            path, feishu_tool.push_text_via_bound_domain)
         self.secret_url = (
             f"https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN_{uuid.uuid4().hex[:12]}"
         )
@@ -62,13 +65,17 @@ class DeskToolTestCase(unittest.TestCase):
         if os.path.exists(self.temp_path):
             os.unlink(self.temp_path)
 
-    def _submit(self, sender, args=None):
-        """以注入 sender + 占位 webhook 跑一次提交,返回(回执, sender)。"""
+    def _submit(self, sender, args=None, tool=None):
+        """以注入 sender + 占位 webhook 跑一次提交,返回(回执, sender)。
+
+        tool 缺省取裸提交工具;传经门包装件时走"分级→规则→执行→回执钩子"
+        全链(03 票起回执由 wrapper 落盘,裸调用不写回执)。
+        """
         with InjectedSender(sender), patch(
-            "auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url",
+            "auditronclaw.domains.feishu.tool.get_feishu_webhook_url",
             return_value=self.secret_url,
         ):
-            result = self.submit_tool.invoke(args or _report_args())
+            result = (tool or self.submit_tool).invoke(args or _report_args())
         return result, sender
 
     def _tasks_on_disk(self):
@@ -215,13 +222,26 @@ class TestCredentialNeverReachesAuditFile(DeskToolTestCase):
     """凭据纪律落盘级验证:提交一轮后,审计 jsonl 全文不含 webhook URL。"""
 
     def test_audit_file_clean_after_submit(self):
+        """经门提交一轮:审计 jsonl 全文不含 webhook URL,回执真实落盘。
+
+        03 票起推送回执随 Receipt 返回值搭载,由 wrapper 的 AuditReceiptHook
+        单源落盘——必须经门调用才走"工具 → hook → jsonl"全链,裸调用不写回执。
+        写类工具必批,经门调用需规则放行(先例 test_domain_gate_tools)。
+        """
+        from auditronclaw.core.approval.gate import wrap_tool
+        from auditronclaw.core.approval.hooks import AuditReceiptHook
         from auditronclaw.core.logger import get_audit_logger
-        self._submit(FakeSender())
+
+        gated = wrap_tool(self.submit_tool, thread_id="desk_gate_test",
+                          rule_matcher=lambda *a, **k: {"id": "probe"},
+                          hooks=(AuditReceiptHook(),))
+        self._submit(FakeSender(), tool=gated)
         get_audit_logger().log_queue.join()
         with open(os.path.join(get_audit_logger().log_dir, "system.jsonl"), encoding="utf-8") as f:
             full_text = f.read()
         self.assertNotIn(self.secret_url, full_text)
         self.assertIn("事务台", full_text, "提交必须留可检索的审计事件")
+        self.assertIn("飞书推送回执", full_text, "推送回执必须经回执钩子落盘")
 
 
 if __name__ == '__main__':

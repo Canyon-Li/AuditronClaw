@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Callable, Literal, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
@@ -15,7 +15,6 @@ from difflib import unified_diff
 from ..config import WorkspaceConfig
 from ..logger import get_audit_logger
 from .sandbox_tools import build_office_tools
-from .feishu_tool import send_feishu_summary
 from .mail_tool import read_recent_emails
 
 
@@ -526,11 +525,18 @@ def create_task_tools(tasks_file: str) -> list:
     return [schedule_task, list_scheduled_tasks, delete_scheduled_task, modify_scheduled_task]
 
 
-def build_builtin_tools(workspace: WorkspaceConfig, thread_id: str) -> list:
+def build_builtin_tools(workspace: WorkspaceConfig, thread_id: str,
+                        *, feishu_tools: Sequence = (),
+                        desk_push: Optional[Callable] = None) -> list:
     """内置工具集装配工厂：工作区路径与会话身份在此注入，一次装配全套。
 
     路径不进模块级常量（05 票）：入口从工作区装配 WorkspaceConfig 传入，
     工具经工厂闭包持有落点——测试与基准各装配各的临时工作区，互不串台。
+
+    域工具接线（03 票，ADR-002）：feishu_tools 是 feishu 域 register().tools、
+    desk_push 是该域推送核心路径，均由装配点显式传入（core 不 import 域）。
+    域工具插回 feishu 迁移前的清单原位——装配顺序与改造前基线一致；
+    两者缺省的桩装配不含 feishu 能力（形状探针用），真实装配必传。
     """
     return [
         get_current_time,
@@ -539,7 +545,7 @@ def build_builtin_tools(workspace: WorkspaceConfig, thread_id: str) -> list:
         *build_office_tools(workspace.office_dir),
         get_system_model_info,
         *create_task_tools(workspace.tasks_file),
-        send_feishu_summary,
+        *feishu_tools,
         read_recent_emails,
-        create_desk_submit_tool(workspace.tasks_file),
+        create_desk_submit_tool(workspace.tasks_file, desk_push),
     ]

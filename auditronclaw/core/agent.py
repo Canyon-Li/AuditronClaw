@@ -17,10 +17,27 @@ from .skill_loader import load_dynamic_skills
 from langchain_core.runnables import RunnableConfig
 import os
 
+# 域接线(ADR-002):装配点是 core 里唯一 import 域的地方——显式 import
+# 加调用 register(),不做自动发现。feishu 是首个域包实测者(03 票)。
+from ..domains.feishu import tool as feishu_domain
+
 # ============ 域包接线(ADR-002):显式 import + 调用 register(),不做自动发现 ============
-# 生产域目前为零(feishu 迁移是后续票的对象);加域即在此追加一条 register
-# ——装配点要可读,不要魔法。register() 契约见 core/domain.py。
+# 下一个新域在此追加一条 register——装配点要可读,不要魔法。register() 契约
+# 见 core/domain.py。feishu(03 票迁入)是特例:其工具插回内置清单的迁移前
+# 原位以保装配顺序与改造前基线一致,不走本表追加(两类来源由票 04 收口统一)。
 _DOMAIN_REGISTRARS: tuple = ()
+
+
+def production_roster_registrations() -> list:
+    """合并册的域侧输入(显式接线,无自动发现):表追加域 + 特例路径的 feishu。
+
+    生产装配与票 02 meta-test 共用此单一来源——测试侧不自行复述接线,防漂移。
+    feishu 的工具虽走内置原位,registration 仍进合并册:域侧自报的装配期防线
+    (跨来源同名/遮蔽绑定域工具名,roster.build_static_risk 装配期拒)由此
+    真实覆盖它,而非只被域内契约测试钉住。
+    """
+    registrations = [register() for register in _DOMAIN_REGISTRARS]
+    return [feishu_domain.register(), *registrations]
 
 # ============ 系统提示词（保密性改造：敏感段与用户内容分段隔离） ============
 #
@@ -99,6 +116,12 @@ def create_agent_app(
     落点由它给出，不走模块级常量。
     """
     if tools is None:
+        # feishu 域接线(03 票,ADR-002 首个域包实测者):register() 自报的工具
+        # 插回内置清单的迁移前原位——装配顺序与改造前基线一致;推送核心路径
+        # 注入事务台提交工具(desk 存量与 feishu 域的既有共享经装配点接线,
+        # core 不 import 域)。send_feishu_summary 是条件分级工具(绑定域):
+        # 分级登记在 core 名册(字面量),register().risk 为空是设计结果
+        feishu_registration = feishu_domain.register()
         # 域包接线(ADR-002):register() 逐域调用,域工具紧随内置工厂产物、
         # 先于技能装配;静态自报合并成 frozen 名册注入门(见下方 wrap_all_tools)
         registrations = [register() for register in _DOMAIN_REGISTRARS]
@@ -106,12 +129,17 @@ def create_agent_app(
                         for t in registration.tools]
         dynamic_tools = load_dynamic_skills(workspace.skills_dir, workspace.office_dir)
         # 内置全套按工作区与会话装配一次:路径与身份经工厂闭包注入
-        actual_tools = (build_builtin_tools(workspace, thread_id) + domain_tools
-                        + dynamic_tools)
+        actual_tools = (build_builtin_tools(
+                            workspace, thread_id,
+                            feishu_tools=feishu_registration.tools,
+                            desk_push=feishu_domain.push_text_via_bound_domain)
+                        + domain_tools + dynamic_tools)
+        # 合并册的域侧输入走单一来源导出(票 02 meta-test 同源读它,防复述漂移)
+        roster_registrations = production_roster_registrations()
     else:
-        registrations = []
         actual_tools = tools
-    static_risk = build_static_risk(*registrations)
+        roster_registrations = []
+    static_risk = build_static_risk(*roster_registrations)
 
     # 外接工具按个追加(ADR-001):内置全保留;同名时外接覆盖内置,且只保留一个。
     # 注意外接工具不经过命令白名单与路径防护(仅调用被审计),注入者自担安全责任。

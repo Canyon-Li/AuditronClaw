@@ -240,6 +240,8 @@ class TestClassifierProvenance(unittest.TestCase):
 
 from unittest.mock import MagicMock, patch
 
+from helpers import production_builtin_tools
+
 from langchain_core.messages import AIMessage
 from langchain_core.tools import StructuredTool, tool
 from langgraph.checkpoint.memory import MemorySaver
@@ -447,9 +449,10 @@ class TestAssemblyPointWrapping(unittest.TestCase):
         with ExitStack() as stack:
             self._create_app_with(stack, llm_mock, extra_tools=[fake_extra])
             bound = llm_mock.bind_tools.call_args[0][0]
-        from auditronclaw.core.tools.builtins import build_builtin_tools
-        expected = [t.name for t in build_builtin_tools(self.workspace,
-                                                        "assembly_test")]
+        # 03 票起生产装配经参数注入 feishu 域工具(插回迁移前原位)——对照侧
+        # 走共享的生产同款装配采样,否则 expected 缺 send_feishu_summary 必红
+        expected = [t.name for t in production_builtin_tools(self.workspace,
+                                                             "assembly_test")]
         self.assertEqual([t.name for t in bound],
                          expected + ["fake_extra"],
                          "包装件同名同序,内置全保留、外接追加")

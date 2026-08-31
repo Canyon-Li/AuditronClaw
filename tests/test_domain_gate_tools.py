@@ -5,14 +5,16 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from helpers import FakeSender, InjectedSender
+from helpers import FakeSender, InjectedSender, production_builtin_tools
 
-from auditronclaw.core.tools import domain_gate, feishu_tool
+from auditronclaw.core.tools import domain_gate
 from auditronclaw.core.tools.domain_gate import (
     DEFAULT_ALLOWED_DOMAINS,
+    DomainDenied,
     check_domain_allowed,
 )
-from auditronclaw.core.tools.feishu_tool import send_feishu_summary
+from auditronclaw.domains.feishu import tool as feishu_tool
+from auditronclaw.domains.feishu.tool import send_feishu_summary
 
 
 class TestDomainGatePureFunction(unittest.TestCase):
@@ -110,16 +112,22 @@ class TestDomainGateAudit(unittest.TestCase):
                 self.assertIn("api.github.com", kwargs.get("content", ""))
 
     def test_denied_domain_logs_audit_event(self):
-        """名单外域名拒绝时落审计事件：thread_id=system 级，含被拒域名与工具名"""
+        """名单外域名拒绝时落审计事件：thread_id=system 级，含被拒域名与工具名
+        （03 票起工具体抛 DomainDenied，由审批门 wrapper 统一格式落拒绝回执。
+        经门调用以规则放行形态抵达工具体——名单外时分级是 domain_extend，
+        守卫是门放行后的结构性兜底，先例 mail 试点 test_domain_guard_blocks）"""
+        from auditronclaw.core.approval.gate import wrap_tool
+        gated = wrap_tool(send_feishu_summary, thread_id="denial_probe",
+                          rule_matcher=lambda *a, **k: {"id": "probe"})
         with patch("auditronclaw.core.logger._audit_logger") as mock_logger:
-            with patch("auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url",
+            with patch("auditronclaw.domains.feishu.tool.get_feishu_webhook_url",
                        return_value="https://open.feishu.cn/open-apis/bot/v2/hook/SECRET_TOKEN"):
                 # 把飞书域从名单里挤出去：默认/环境变量/运行时审批规则三个
                 # 名单来源全空（05 票起审批规则也是名单源，需一并隔离）
                 with patch.object(domain_gate, "DEFAULT_ALLOWED_DOMAINS", set()), \
                      patch.object(domain_gate, "_EXTENDED_DOMAINS", set()), \
                      patch.object(domain_gate, "load_approval_rule_domains", return_value=[]):
-                    result = send_feishu_summary.invoke({"summary_text": "test"})
+                    result = gated.invoke({"summary_text": "test"})
         self.assertIn("白名单拦截", result)
         denied_logged = False
         for call in mock_logger.log_event.call_args_list:
@@ -139,7 +147,7 @@ class TestSendFeishuSummary(unittest.TestCase):
         """成功路径：假 sender 捕获发送内容，返回脱敏回执"""
         fake = FakeSender()
         with InjectedSender(fake), patch(
-            "auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url",
+            "auditronclaw.domains.feishu.tool.get_feishu_webhook_url",
             return_value="https://open.feishu.cn/open-apis/bot/v2/hook/SECRET_TOKEN",
         ):
             result = send_feishu_summary.invoke({"summary_text": "邮箱事务台日报"})
@@ -155,7 +163,7 @@ class TestSendFeishuSummary(unittest.TestCase):
         """失败路径：不抛裸异常，返回结构化错误（错误类型级，不透传异常消息）"""
         fake = FakeSender(error=ConnectionError("connection refused"))
         with InjectedSender(fake), patch(
-            "auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url",
+            "auditronclaw.domains.feishu.tool.get_feishu_webhook_url",
             return_value="https://open.feishu.cn/open-apis/bot/v2/hook/SECRET_TOKEN",
         ):
             result = send_feishu_summary.invoke({"summary_text": "test"})
@@ -169,7 +177,7 @@ class TestSendFeishuSummary(unittest.TestCase):
         # 逼真形态：urllib 异常消息常内嵌完整请求 URL
         fake = FakeSender(error=OSError(f"HTTP request failed for {secret}"))
         with InjectedSender(fake), patch(
-            "auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url",
+            "auditronclaw.domains.feishu.tool.get_feishu_webhook_url",
             return_value=secret,
         ):
             result = send_feishu_summary.invoke({"summary_text": "test"})
@@ -180,11 +188,26 @@ class TestSendFeishuSummary(unittest.TestCase):
     def test_missing_webhook_config_structured_error(self):
         """未配置 webhook：结构化错误，不碰网络"""
         with InjectedSender(FakeSender()), patch(
-            "auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url",
+            "auditronclaw.domains.feishu.tool.get_feishu_webhook_url",
             return_value=None,
         ):
             result = send_feishu_summary.invoke({"summary_text": "test"})
         self.assertIn("失败", result)
+
+    def test_raw_denial_raises_typed_exception(self):
+        """裸调用（无 wrapper）在名单外直接抛 DomainDenied：拒绝回执的落盘
+        与话术属 wrapper（回执单源），裸调方必须过门——03 票结构性变化"""
+        fake = FakeSender()
+        with InjectedSender(fake), patch(
+            "auditronclaw.domains.feishu.tool.get_feishu_webhook_url",
+            return_value="https://open.feishu.cn/open-apis/bot/v2/hook/SECRET_TOKEN",
+        ):
+            with patch.object(domain_gate, "DEFAULT_ALLOWED_DOMAINS", set()), \
+                 patch.object(domain_gate, "_EXTENDED_DOMAINS", set()), \
+                 patch.object(domain_gate, "load_approval_rule_domains", return_value=[]):
+                with self.assertRaises(DomainDenied):
+                    send_feishu_summary.invoke({"summary_text": "test"})
+        self.assertEqual(fake.sent, [], "守卫拦截后不得触达传输层")
 
     def test_tool_never_leaks_webhook_url(self):
         """凭据纪律：参数、返回值、审计日志全文不含 webhook URL 串"""
@@ -192,7 +215,7 @@ class TestSendFeishuSummary(unittest.TestCase):
         with InjectedSender(FakeSender()), patch(
             "auditronclaw.core.logger._audit_logger"
         ) as mock_logger:
-            with patch("auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url",
+            with patch("auditronclaw.domains.feishu.tool.get_feishu_webhook_url",
                        return_value=secret):
                 # 成功一轮
                 ok_result = send_feishu_summary.invoke({"summary_text": "日报内容"})
@@ -223,13 +246,12 @@ class TestSendFeishuSummaryToolShape(unittest.TestCase):
         self.assertEqual(set(props) & forbidden, set())
 
     def test_tool_registered_in_builtins(self):
-        """工具注册进内置工具清单"""
+        """工具注册进内置工具清单（03 票起经装配接线传入——走生产同款装配采样）"""
         import tempfile
         from auditronclaw.core.config import WorkspaceConfig
-        from auditronclaw.core.tools.builtins import build_builtin_tools
         with tempfile.TemporaryDirectory() as tmp:
             workspace = WorkspaceConfig.from_root(tmp)
-            names = {t.name for t in build_builtin_tools(workspace, "shape_probe")}
+            names = {t.name for t in production_builtin_tools(workspace, "shape_probe")}
         self.assertIn("send_feishu_summary", names)
 
     def test_docstring_documents_boundary(self):
@@ -244,24 +266,30 @@ class TestCredentialNeverReachesAuditFile(unittest.TestCase):
 
     与 mock 断言互补——logger 是单例 + 异步队列，必须等队列 flush 到
     文件后再扫全文，钉住"凭据不落任何一行日志"。
+    03 票起回执由 wrapper 的 AuditReceiptHook 落盘——必须经门调用，
+    回执才真实走一遍"工具 → hook → jsonl"全链，裸调用不写回执。
     注意不能对单例调 shutdown()（会杀全局工作线程，atexit 再 join 永久
     挂起）——用 log_queue.join() 等队列排空即可。
     """
 
     def test_audit_file_clean_after_tool_run(self):
         import uuid
+        from auditronclaw.core.approval.gate import wrap_tool
+        from auditronclaw.core.approval.hooks import AuditReceiptHook
         from auditronclaw.core.logger import get_audit_logger
 
         secret = f"https://open.feishu.cn/open-apis/bot/v2/hook/TOKEN_{uuid.uuid4().hex[:12]}"
+        gated = wrap_tool(send_feishu_summary, thread_id="gate_test",
+                          hooks=(AuditReceiptHook(),))
 
-        # 成功 + 异常消息内嵌 URL 的失败，两轮都走真实单例 logger
+        # 成功 + 异常消息内嵌 URL 的失败，两轮都走真实单例 logger（经门）
         with InjectedSender(FakeSender()), patch(
-            "auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url",
+            "auditronclaw.domains.feishu.tool.get_feishu_webhook_url",
             return_value=secret,
         ):
-            send_feishu_summary.invoke({"summary_text": "日报内容"})
+            gated.invoke({"summary_text": "日报内容"})
             feishu_tool.set_sender(FakeSender(error=OSError(f"failed for {secret}")))
-            send_feishu_summary.invoke({"summary_text": "日报内容"})
+            gated.invoke({"summary_text": "日报内容"})
 
         # 等异步队列 flush 到 jsonl，再扫 system 级日志全文
         get_audit_logger().log_queue.join()
@@ -269,6 +297,9 @@ class TestCredentialNeverReachesAuditFile(unittest.TestCase):
         self.assertTrue(os.path.exists(system_log), "system 级审计日志应存在")
         with open(system_log, encoding="utf-8") as f:
             full_text = f.read()
+        # 两轮回执都真实落盘了（成功 + 错误兜底），钉子不是形同虚设
+        self.assertIn("飞书推送回执", full_text)
+        self.assertIn("飞书推送失败", full_text)
         self.assertNotIn(secret, full_text)
 
 

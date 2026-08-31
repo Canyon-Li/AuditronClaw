@@ -26,10 +26,11 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from helpers import production_builtin_tools
+
 from auditronclaw.core.approval.classifier import classify_tool_call
 from auditronclaw.core.config import WorkspaceConfig
 from auditronclaw.core.tools import domain_gate
-from auditronclaw.core.tools.builtins import build_builtin_tools
 
 BASELINE_DIR = os.path.join(os.path.dirname(__file__), "baseline")
 TOOL_SET_FIXTURE = os.path.join(BASELINE_DIR, "pre_refactor_tool_set.json")
@@ -80,11 +81,14 @@ def assembled_tool_names() -> list:
 
     技能工具随工作区内容装配、外接工具由调用方注入，两者都不在默认
     装配里——集合等值检查的覆盖边界与夹具 notes 一致。
+    03 票 feishu 迁域后，生产装配点经 build_builtin_tools 参数注入域工具
+    （插回迁移前原位）——采样走共享的生产同款装配（helpers）；夹具本身不动
+    （语义不变即顺序不变）。
     """
     workspace = WorkspaceConfig.from_root(tempfile.mkdtemp(prefix="baseline_ws_"))
     try:
         workspace.ensure_dirs()
-        return [t.name for t in build_builtin_tools(workspace, "baseline_probe")]
+        return [t.name for t in production_builtin_tools(workspace, "baseline_probe")]
     finally:
         shutil.rmtree(workspace.root, ignore_errors=True)
 

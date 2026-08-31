@@ -134,7 +134,7 @@ from auditronclaw.core.session import (
     ToolResult,
     TurnEnd,
 )
-from auditronclaw.core.tools.feishu_tool import send_feishu_summary
+from auditronclaw.domains.feishu.tool import send_feishu_summary
 
 
 class ScriptedLLM:
@@ -182,7 +182,7 @@ class TestDomainExtensionClosedLoop(DomainRuleTestBase):
             audit_mock = stack.enter_context(
                 patch('auditronclaw.core.logger._audit_logger'))
             stack.enter_context(patch(
-                'auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url',
+                'auditronclaw.domains.feishu.tool.get_feishu_webhook_url',
                 return_value="https://open.feishu.cn/open-apis/bot/v2/hook/SECRET_TOKEN"))
             from auditronclaw.core.agent import create_agent_app
             from auditronclaw.core.config import WorkspaceConfig
