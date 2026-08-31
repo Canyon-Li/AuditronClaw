@@ -22,22 +22,28 @@ import os
 from ..domains.feishu import tool as feishu_domain
 
 # ============ 域包接线(ADR-002):显式 import + 调用 register(),不做自动发现 ============
-# 下一个新域在此追加一条 register——装配点要可读,不要魔法。register() 契约
-# 见 core/domain.py。feishu(03 票迁入)是特例:其工具插回内置清单的迁移前
-# 原位以保装配顺序与改造前基线一致,不走本表追加(两类来源由票 04 收口统一)。
-_DOMAIN_REGISTRARS: tuple = ()
+# 每域一条,下一个新域在此追加——装配点要可读,不要魔法。register() 契约
+# 见 core/domain.py。登记与装配检查不分来源(合并册/包门/基线快照同一条路);
+# 工具装配位两种(04 票收口):
+# - 表追加(新域一律走此位):工具紧随内置工厂产物、先于技能装配;
+# - 原位插回(_LEGACY_SLOT_REGISTERS 点名,仅存量迁移域):工具经内置工厂
+#   参数插回迁移前原位,保票 01 基线的装配顺序——新域走此位等于移动基尺。
+# 原位集合冻结为恰 feishu 一个(收口钉子逐项钉死集合内容):内置工厂的原位
+# 槽位与 desk_push 注入都是按它写死的,第二个原位插回域出现时(如 mail
+# 迁移)须重开装配位设计,不视为既有机制的自动扩容。
+_DOMAIN_REGISTRARS: tuple = (feishu_domain.register,)
+_LEGACY_SLOT_REGISTERS: frozenset = frozenset({feishu_domain.register})
 
 
 def production_roster_registrations() -> list:
-    """合并册的域侧输入(显式接线,无自动发现):表追加域 + 特例路径的 feishu。
+    """合并册的域侧输入(显式接线,无自动发现):单一来源 = 接线表。
 
-    生产装配与票 02 meta-test 共用此单一来源——测试侧不自行复述接线,防漂移。
-    feishu 的工具虽走内置原位,registration 仍进合并册:域侧自报的装配期防线
+    生产装配与票 02 meta-test 共用此导出——测试侧不自行复述接线,防漂移。
+    原位插回域(feishu)的 registration 同样出自本表:域侧自报的装配期防线
     (跨来源同名/遮蔽绑定域工具名,roster.build_static_risk 装配期拒)由此
     真实覆盖它,而非只被域内契约测试钉住。
     """
-    registrations = [register() for register in _DOMAIN_REGISTRARS]
-    return [feishu_domain.register(), *registrations]
+    return [register() for register in _DOMAIN_REGISTRARS]
 
 # ============ 系统提示词（保密性改造：敏感段与用户内容分段隔离） ============
 #
@@ -116,26 +122,30 @@ def create_agent_app(
     落点由它给出，不走模块级常量。
     """
     if tools is None:
-        # feishu 域接线(03 票,ADR-002 首个域包实测者):register() 自报的工具
-        # 插回内置清单的迁移前原位——装配顺序与改造前基线一致;推送核心路径
-        # 注入事务台提交工具(desk 存量与 feishu 域的既有共享经装配点接线,
-        # core 不 import 域)。send_feishu_summary 是条件分级工具(绑定域):
-        # 分级登记在 core 名册(字面量),register().risk 为空是设计结果
-        feishu_registration = feishu_domain.register()
-        # 域包接线(ADR-002):register() 逐域调用,域工具紧随内置工厂产物、
-        # 先于技能装配;静态自报合并成 frozen 名册注入门(见下方 wrap_all_tools)
-        registrations = [register() for register in _DOMAIN_REGISTRARS]
-        domain_tools = [t for registration in registrations
-                        for t in registration.tools]
+        # 域装配(04 票收口):登记单一来源 = 接线表;工具按装配位分两路——
+        # 原位插回(存量迁移域 feishu:插回内置清单迁移前原位,保票 01 基线
+        # 装配序;其推送核心路径并注入事务台提交工具——desk 存量与 feishu
+        # 域的既有共享经装配点接线,core 不 import 域)与表追加(新域:紧随
+        # 内置工厂产物、先于技能装配)
+        registrations = production_roster_registrations()
+        legacy_slot_tools: list = []
+        appended_domain_tools: list = []
+        # registrations 与接线表逐位对齐(导出端就是表的顺序迭代):strict 防
+        # 长度漂移,错位会改装配序被基线对照抓住——对齐是显式不变式,非假设
+        for registrar, registration in zip(_DOMAIN_REGISTRARS, registrations,
+                                           strict=True):
+            slot = legacy_slot_tools if registrar in _LEGACY_SLOT_REGISTERS \
+                else appended_domain_tools
+            slot.extend(registration.tools)
         dynamic_tools = load_dynamic_skills(workspace.skills_dir, workspace.office_dir)
         # 内置全套按工作区与会话装配一次:路径与身份经工厂闭包注入
         actual_tools = (build_builtin_tools(
                             workspace, thread_id,
-                            feishu_tools=feishu_registration.tools,
+                            feishu_tools=legacy_slot_tools,
                             desk_push=feishu_domain.push_text_via_bound_domain)
-                        + domain_tools + dynamic_tools)
-        # 合并册的域侧输入走单一来源导出(票 02 meta-test 同源读它,防复述漂移)
-        roster_registrations = production_roster_registrations()
+                        + appended_domain_tools + dynamic_tools)
+        # 合并册的域侧输入与工具装配同一来源(票 02 meta-test 同源读它,防复述漂移)
+        roster_registrations = registrations
     else:
         actual_tools = tools
         roster_registrations = []

@@ -429,10 +429,11 @@ def fake_extra(x: int) -> int:
 class TestAssemblyPointWrapping(unittest.TestCase):
     """create_agent_app 是唯一装配点:内置/技能/外接的全部注册工具过门。"""
 
-    def _create_app_with(self, stack, llm, extra_tools=None):
+    def _create_app_with(self, stack, llm, extra_tools=None, skills=None):
         from auditronclaw.core.agent import create_agent_app
         stack.enter_context(patch('auditronclaw.core.agent.get_provider', return_value=llm))
-        stack.enter_context(patch('auditronclaw.core.agent.load_dynamic_skills', return_value=[]))
+        stack.enter_context(patch('auditronclaw.core.agent.load_dynamic_skills',
+                                  return_value=list(skills or [])))
         self.workspace = _tmp_workspace(self)
         return create_agent_app(
             provider_name="fake", model_name="fake-model",
@@ -456,6 +457,48 @@ class TestAssemblyPointWrapping(unittest.TestCase):
         self.assertEqual([t.name for t in bound],
                          expected + ["fake_extra"],
                          "包装件同名同序,内置全保留、外接追加")
+        for t in bound:
+            self.assertTrue(t.metadata.get("approval_gate"),
+                            f"工具 {t.name} 未过门")
+
+    def test_domain_and_legacy_tools_all_carry_gate_metadata(self):
+        """04 票扩展:域工具与旧域工具全部带 approval_gate 元数据(两类来源同一套装配检查)。
+
+        先钉住装配集里两类来源都在(域工具 send_feishu_summary;旧域三件
+        mail/tasks/desk 各点名一个),防"逐件带标记"在残缺装配上空转;
+        技能与外接工具设计上不进分级名册(fail-closed 默认必批,只进集合
+        检查、不拍级别),但同过装配、同带门标记。
+        """
+        from contextlib import ExitStack
+        from auditronclaw.core.skill_loader import DynamicSkillInput
+
+        def skill_body(mode: str, command: str = "") -> str:
+            """测试技能:懒执行器形状(mode/command)"""
+            return "ok"
+
+        skill_tool = StructuredTool.from_function(
+            func=skill_body, name="fake_skill", description="测试技能",
+            args_schema=DynamicSkillInput, metadata={"skill_folder": "fake_skill"})
+
+        llm_mock = MagicMock()
+        llm_mock.bind_tools.return_value = llm_mock
+        with ExitStack() as stack:
+            self._create_app_with(stack, llm_mock,
+                                  extra_tools=[fake_extra], skills=[skill_tool])
+            bound = llm_mock.bind_tools.call_args[0][0]
+        names = [t.name for t in bound]
+        # 集合等值检查覆盖全部装配工具名:内置(域 + 旧域 + shell) + 技能 + 外接
+        expected = [t.name for t in production_builtin_tools(self.workspace,
+                                                             "assembly_test")]
+        self.assertEqual(names, expected + ["fake_skill", "fake_extra"],
+                         "装配集合等值:内置全保留,技能紧随域装配,外接追加")
+        for domain_or_legacy in ("send_feishu_summary",         # 域包工具(feishu)
+                                 "read_recent_emails",          # 旧域 mail(core 旧工厂供给)
+                                 "schedule_task",               # 旧域 tasks(core 旧工厂供给)
+                                 "submit_mailbox_desk_report",  # 旧域 desk(core 旧工厂供给)
+                                 "execute_office_shell"):       # shell 按命令段判
+            self.assertIn(domain_or_legacy, names,
+                          f"装配集缺 {domain_or_legacy}——两类来源断言失去对象")
         for t in bound:
             self.assertTrue(t.metadata.get("approval_gate"),
                             f"工具 {t.name} 未过门")

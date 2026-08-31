@@ -58,7 +58,7 @@ def _peek_tool():
 
 def _production_registrations() -> list:
     """装配点喂给合并册的全部生产域 register() 产物——直接读 agent 导出的
-    单一来源(表追加域 + 特例原位路径的 feishu),测试侧不自行复述接线。"""
+    单一来源(接线表,原位插回域也在表内),测试侧不自行复述接线。"""
     from auditronclaw.core.agent import production_roster_registrations
     return production_roster_registrations()
 
@@ -350,8 +350,12 @@ class TestAssemblyWiring(unittest.TestCase):
                                       return_value=llm_mock))
             stack.enter_context(patch('auditronclaw.core.agent.load_dynamic_skills',
                                       return_value=[]))
-            stack.enter_context(patch('auditronclaw.core.agent._DOMAIN_REGISTRARS',
-                                      (fixture_register,)))
+            # 04 票起 feishu 也在接线表(原位插回);patch 镜像生产接线再追加
+            # 夹具域——夹具走表追加,钉住追加位与表内域不受夹具装配影响
+            from auditronclaw.domains.feishu import tool as feishu_domain
+            stack.enter_context(patch(
+                'auditronclaw.core.agent._DOMAIN_REGISTRARS',
+                (feishu_domain.register, fixture_register)))
             stack.enter_context(patch('auditronclaw.core.logger._audit_logger'))
             create_agent_app(provider_name="fake", model_name="fake-model",
                              workspace=workspace, checkpointer=MemorySaver(),
@@ -367,16 +371,26 @@ class TestAssemblyWiring(unittest.TestCase):
             # 自报 read 经门直通——合并册注入生效的端到端证据
             self.assertEqual(peek.invoke({"hours": 1}), "empty")
 
-    def test_production_domains_empty_until_first_domain(self):
-        """现状钉子:registrars 接线表为零。
+    def test_domain_registrar_table_wiring_closed(self):
+        """收口钉子(04 票):生产域接线表 = 各域 register 的显式清单。
 
-        feishu(03 票已迁入域包)不走本表——其工具经 build_builtin_tools
-        参数插回迁移前原位,保装配顺序与改造前基线一致;两类来源(原位
-        参数注入 vs 表追加)的收口统一是票 04 的对象,届时本断言翻红
-        提醒接线确认(不是阻力,是检查点)。
+        登记面单一来源是接线表(合并册输入与工具装配都从它出发);原位插回
+        子集只点名存量迁移域(feishu——工具插回内置清单迁移前原位,保票 01
+        基线装配序),且必须是接线表的子集:不在表里的域等于没接线
+        (meta-test 1 即红)。表内容变更翻红是检查点,确认接线后更新本断言。
         """
-        from auditronclaw.core.agent import _DOMAIN_REGISTRARS
-        self.assertEqual(_DOMAIN_REGISTRARS, ())
+        from auditronclaw.core.agent import (
+            _DOMAIN_REGISTRARS,
+            _LEGACY_SLOT_REGISTERS,
+        )
+        from auditronclaw.domains.feishu import tool as feishu_domain
+        self.assertEqual(_DOMAIN_REGISTRARS, (feishu_domain.register,),
+                         "接线表与生产域不符——确认接线后更新本断言")
+        self.assertEqual(_LEGACY_SLOT_REGISTERS,
+                         frozenset({feishu_domain.register}))
+        self.assertLessEqual(set(_LEGACY_SLOT_REGISTERS),
+                             set(_DOMAIN_REGISTRARS),
+                             "原位插回域必须在接线表内——不在表里即未接线")
 
 
 if __name__ == '__main__':
