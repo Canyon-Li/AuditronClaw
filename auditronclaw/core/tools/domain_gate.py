@@ -44,8 +44,8 @@ def init_domain_gate(approval_rules_file: str) -> None:
     （shell export 过），任何 import 本模块的入口都在 logger 初始化前
     RuntimeError；装配期 logger 已锚定，预热安全。不经
     refresh_extended_domains()：那会触发 approval 模块链回导本模块
-    （延迟导入破环在"本模块经 feishu_tool/mail_tool 导入"的窗口内不成立）；
-    审批规则部分即时读盘，无需装配期预热。
+    （延迟导入破环在"本模块经 mail_tool / feishu 域 tool 导入"的窗口内
+    不成立）；审批规则部分即时读盘，无需装配期预热。
     """
     global _approval_rules_file, _LAST_ENV_RAW, _EXTENDED_DOMAINS
     _approval_rules_file = approval_rules_file

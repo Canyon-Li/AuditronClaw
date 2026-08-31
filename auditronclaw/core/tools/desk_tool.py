@@ -1,9 +1,15 @@
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from pydantic import BaseModel, Field
 
 from .base import auditronclaw_tool
+from .domain_gate import (
+    DomainDenied,
+    domain_denied_audit_content,
+    domain_denied_reply,
+)
+from ..approval.hooks import Receipt
 from ..logger import get_audit_logger
 
 # ============ 事务台结构化提交工具 ============
@@ -97,11 +103,15 @@ def _target_time_for(deadline: Optional[str]) -> str:
     return target.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def create_desk_submit_tool(tasks_file: str):
-    """事务台提交工具装配工厂：待办落点(tasks_file)在此注入。
+def create_desk_submit_tool(tasks_file: str, push_text: Optional[Callable] = None):
+    """事务台提交工具装配工厂：待办落点(tasks_file)与推送核心路径(push_text)在此注入。
 
     队列路径不进模块级常量（05 票）：与 create_task_tools 同一落点由
     装配方保证——测试与基准各装配各的临时队列文件。
+    push_text 是 feishu 域的 push_text_via_bound_domain（03 票起经装配点
+    注入：core 不 import 域，desk 存量与 feishu 的共享核心路径经装配接线）。
+    None 仅供不接线推送的桩装配（形状探针），真实装配必传——缺失时提交
+    即返回结构化错误，fail-loud 不静默跳过推送步。
     """
     @auditronclaw_tool(args_schema=DeskReport)
     def submit_mailbox_desk_report(
@@ -137,6 +147,11 @@ def create_desk_submit_tool(tasks_file: str):
         3. deadline 缺失、格式错误或已过期时，工具自动设为明天 09:00，不需要你算时间；
         4. webhook 等凭据只存在宿主机 .env，不会出现在参数、返回值或审计日志中。
         """
+        if push_text is None:
+            return (
+                "❌ 事务台提交未装配：推送核心路径未接线（desk_push 未注入，"
+                "桩装配不支持事务台提交——请检查装配点接线）。"
+            )
         try:
             report = DeskReport(
                 window_hours=window_hours,
@@ -164,22 +179,34 @@ def create_desk_submit_tool(tasks_file: str):
                     ),
                 )
 
-            # 2. 推送（共用飞书核心路径：同一注入点、同一道域名门、同一套审计）
-            from . import feishu_tool
+            # 2. 推送（共用飞书核心路径：同一注入点、同一道域名门、同一套审计
+            #    ——03 票起经装配注入，core 不 import 域；推送回执的审计内容
+            #    随 Receipt 搭载，由下方返回值一并转交 hooks 单源落盘）
             text = render_desk_report_text(report)
-            pushed, push_message = feishu_tool.push_text_via_bound_domain(
+            pushed, push_message = push_text(
                 text, tool_name=submit_mailbox_desk_report.name
             )
 
-            # 3. 结构化回执：落盘数与推送结果分开陈述，成功失败都如实
-            if pushed:
-                return (
-                    f"✅ 事务台本轮完成：待办 {len(report.todos)} 项已落任务列表。"
-                    f"{push_message}"
-                )
-            return (
+            # 3. 结构化回执：落盘数与推送结果分开陈述，成功失败都如实；
+            #    推送文案是 Receipt 时把它的审计内容搭载出去（裸 str 的
+            #    未配置分支不落审计，与迁移前一致）
+            head = (
+                f"✅ 事务台本轮完成：待办 {len(report.todos)} 项已落任务列表。"
+                if pushed else
                 f"⚠️ 事务台本轮部分完成：待办 {len(report.todos)} 项已落任务列表，"
-                f"但推送未成功。{push_message}"
+                f"但推送未成功。"
+            )
+            reply = f"{head}{push_message}"
+            if type(push_message) is Receipt:
+                return Receipt(reply, push_message.audit_content)
+            return reply
+        except DomainDenied as denied:
+            # 域名门拒绝推送（待办已先行落盘，如实陈述部分完成）：话术与
+            # 审计回执取 domain_gate 单源，本地不写第二份拷贝
+            return Receipt(
+                f"⚠️ 事务台本轮部分完成：待办 {len(report.todos)} 项已落任务列表，"
+                f"但推送未成功。{domain_denied_reply(denied)}",
+                domain_denied_audit_content(denied),
             )
         except Exception as e:
             # 结构化错误兜底：只报错误类型，不透传 str(e)（可能内嵌凭据）

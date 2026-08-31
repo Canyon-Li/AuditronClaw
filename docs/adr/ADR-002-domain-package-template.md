@@ -54,7 +54,7 @@ class DomainRegistration:
 
 | 分工 | 首个实测者 | 状态 |
 |---|---|---|
-| tool.py / register() / 回执统一写审计 / egress 声明 | feishu 域迁移 | 已排期，未实测 |
+| tool.py / register() / 回执统一写审计 / egress 声明 | feishu 域迁移 | 已实测（2026-08-31） |
 | risk 静态自报 | 测试占位域 + 第一个真正的静态分级域 | 测试先行，正式使用待下一个新域 |
 | models.py | 首个有数据形状的域 | 仅纸面设计，未实测 |
 | 持久化（照 _write_tasks 形状） | 首个新持久化域 | 仅纸面设计，未实测；不提前抽象 |

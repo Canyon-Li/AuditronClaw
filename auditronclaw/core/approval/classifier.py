@@ -15,8 +15,6 @@ from typing import Mapping
 
 from ..skill_loader import expand_skill_command
 from ..tools.domain_gate import check_domain_allowed
-from ..tools.mail_tool import IMAP_DOMAIN
-from ..tools.feishu_tool import FEISHU_WEBHOOK_DOMAIN
 # 冗余别名即显式再导出:测试经 classifier 命名空间取 _BASE_ALLOWED_COMMANDS
 from ..tools.sandbox_tools import _BASE_ALLOWED_COMMANDS as _BASE_ALLOWED_COMMANDS
 from ..tools.sandbox_tools import (
@@ -82,9 +80,12 @@ _PURE_READ_TOOLS = frozenset({
 
 # 绑定白名单内域名的推送/拉取:绑定域在名单内即免批(网络实名门已过);
 # 名单外 → domain_extend 必批(扩展流程归 05 票)
+# 域名以字符串字面量写死(ADR-002 裁定:core 不 import 域常量——依赖方向
+# domains → core 单向);字面量与域侧声明的一致性由 meta-test 把守
+# (tests/test_domain_name_consistency.py)
 _BOUND_DOMAIN_TOOLS = {
-    "read_recent_emails": IMAP_DOMAIN,
-    "send_feishu_summary": FEISHU_WEBHOOK_DOMAIN,
+    "read_recent_emails": "imap.qq.com",      # == mail_tool.IMAP_DOMAIN(mail 未迁,存量在 core)
+    "send_feishu_summary": "open.feishu.cn",  # == domains/feishu register().egress 声明
 }
 
 # 写类(落盘/覆写)

@@ -21,6 +21,9 @@ class EgressChannel:
 
     getter/setter 定位哨兵换装点（生产传输件本体）；测试注入假件走各工具
     自己的注入点（set_provider/set_sender），与此处的哨兵换装是两层。
+    domain 是通道绑定的网络实名（绑定域工具的域名）：core 名册以字面量
+    登记同名域名（ADR-002 裁定：core 不 import 域常量），两处一致性由
+    meta-test 把守（tests/test_domain_name_consistency.py）。
     """
 
     name: str                        # 通道名（触碰账与哨兵报错用它说话）
@@ -28,6 +31,7 @@ class EgressChannel:
     getter: Callable[[], Any]        # 取当前生产传输件（哨兵换装前的原值）
     setter: Callable[[Any], None]    # 换传输件（哨兵换装/还原）
     guard: str                       # 哨兵深度：守在哪层、为什么、测试该怎么注入
+    domain: str = ""                 # 绑定目标域；空 = 通道不绑定单一域名
 
 
 _EGRESS_CHANNELS: dict = {}

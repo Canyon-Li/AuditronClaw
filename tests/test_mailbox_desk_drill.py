@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from helpers import FakeSender, InjectedProvider, InjectedSender
 
-from auditronclaw.core.tools.feishu_tool import send_feishu_summary
+from auditronclaw.domains.feishu.tool import send_feishu_summary
 from auditronclaw.core.tools.mail_tool import read_recent_emails
 from auditronclaw.core.tools.builtins import create_task_tools
 
@@ -89,7 +89,7 @@ class TestDeskRoundPushFailureDrill(unittest.TestCase):
         # ---- 第 3 步:推送失败(断网形态:URLError 消息内嵌 URL) ----
         broken_sender = _broken_sender()
         with InjectedSender(broken_sender), patch(
-            "auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url",
+            "auditronclaw.domains.feishu.tool.get_feishu_webhook_url",
             return_value=self.secret_url,
         ):
             failed_push = send_feishu_summary.invoke({"summary_text": "邮箱事务台日报(演练)"})
@@ -106,7 +106,7 @@ class TestDeskRoundPushFailureDrill(unittest.TestCase):
         # ---- 第 4 步:下一轮推送正常(网络恢复,失败不留污染状态) ----
         healed_sender = FakeSender()
         with InjectedSender(healed_sender), patch(
-            "auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url",
+            "auditronclaw.domains.feishu.tool.get_feishu_webhook_url",
             return_value=self.secret_url,
         ):
             ok_push = send_feishu_summary.invoke({"summary_text": "邮箱事务台日报(重试轮)"})
@@ -116,13 +116,23 @@ class TestDeskRoundPushFailureDrill(unittest.TestCase):
         self.assertIn("邮箱事务台日报", healed_sender.sent[0][1]["content"]["text"])
 
     def test_push_failure_leaves_queryable_audit_and_no_credentials(self):
-        """错误结构化可查:审计事件可检索;凭据(占位 URL)不落日志全文"""
+        """错误结构化可查:审计事件可检索;凭据(占位 URL)不落日志全文。
+
+        03 票起回执随 Receipt 返回值走,由审批门 wrapper 的 AuditReceiptHook
+        单源落盘——必须经门调用回执才落 jsonl(裸调用不写回执);绑定域在
+        默认名单内,分级为纯读,经门无需规则。
+        """
+        from auditronclaw.core.approval.gate import wrap_tool
+        from auditronclaw.core.approval.hooks import AuditReceiptHook
+
         broken_sender = _broken_sender()
+        gated = wrap_tool(send_feishu_summary, thread_id="drill_gate_test",
+                          hooks=(AuditReceiptHook(),))
         with InjectedSender(broken_sender), patch(
-            "auditronclaw.core.tools.feishu_tool.get_feishu_webhook_url",
+            "auditronclaw.domains.feishu.tool.get_feishu_webhook_url",
             return_value=self.secret_url,
         ), patch.dict(os.environ, self.env):
-            send_feishu_summary.invoke({"summary_text": "邮箱事务台日报(演练)"})
+            gated.invoke({"summary_text": "邮箱事务台日报(演练)"})
 
         # 等异步队列 flush 到 jsonl,再扫 system 级日志全文
         from auditronclaw.core.logger import get_audit_logger

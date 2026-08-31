@@ -1,4 +1,4 @@
-"""测试共享注入件:三个测试文件共用的传输层假实现与注入上下文(注入点 B 的测试侧)。"""
+"""测试共享件:传输层假实现与注入上下文(注入点 B 的测试侧)+ 生产同款装配采样。"""
 
 
 class FakeSender:
@@ -23,12 +23,12 @@ class InjectedSender:
         self.fake = fake
 
     def __enter__(self):
-        from auditronclaw.core.tools import feishu_tool
+        from auditronclaw.domains.feishu import tool as feishu_tool
         feishu_tool.set_sender(self.fake)
         return self.fake
 
     def __exit__(self, *exc):
-        from auditronclaw.core.tools import feishu_tool
+        from auditronclaw.domains.feishu import tool as feishu_tool
         feishu_tool.set_sender(None)
         return False
 
@@ -48,3 +48,16 @@ class InjectedProvider:
         from auditronclaw.core.tools import mail_tool
         mail_tool.set_provider(None)
         return False
+
+
+def production_builtin_tools(workspace, thread_id):
+    """生产同款内置装配(03 票 feishu 迁域后:域工具与推送核心路径经
+    build_builtin_tools 参数注入,插回迁移前原位——与 core/agent.py 装配点
+    同一接线;采样/对照侧共用此件,不各写一份防接线漂移)。"""
+    from auditronclaw.core.tools.builtins import build_builtin_tools
+    from auditronclaw.domains.feishu import tool as feishu_domain
+    registration = feishu_domain.register()
+    return build_builtin_tools(
+        workspace, thread_id,
+        feishu_tools=registration.tools,
+        desk_push=feishu_domain.push_text_via_bound_domain)

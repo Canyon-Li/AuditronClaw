@@ -22,6 +22,8 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from helpers import production_builtin_tools
+
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -38,7 +40,6 @@ from auditronclaw.core.approval.classifier import (
 )
 from auditronclaw.core.config import WorkspaceConfig
 from auditronclaw.core.domain import DomainRegistration
-from auditronclaw.core.tools.builtins import build_builtin_tools
 
 
 def _fixture_domain(risk: dict) -> DomainRegistration:
@@ -56,17 +57,23 @@ def _peek_tool():
 
 
 def _production_registrations() -> list:
-    """装配点接线的全部生产域 register() 产物(ADR-002:显式接线,无自动发现)。"""
-    from auditronclaw.core.agent import _DOMAIN_REGISTRARS
-    return [register() for register in _DOMAIN_REGISTRARS]
+    """装配点喂给合并册的全部生产域 register() 产物——直接读 agent 导出的
+    单一来源(表追加域 + 特例原位路径的 feishu),测试侧不自行复述接线。"""
+    from auditronclaw.core.agent import production_roster_registrations
+    return production_roster_registrations()
 
 
 def _factory_tool_names() -> set:
-    """core 工厂产物名(临时工作区上装配一次;先例:基线夹具采集)。"""
+    """core 工厂产物名(临时工作区上装配一次;先例:基线夹具采集)。
+
+    经 helpers.production_builtin_tools 走生产同款装配——"工厂产物"含经
+    参数注入的 feishu 域工具,meta-test 1 的覆盖面随之覆盖到它(对绑定域册
+    的归属检查由此真实发生)。
+    """
     workspace = WorkspaceConfig.from_root(tempfile.mkdtemp(prefix="roster_meta_ws_"))
     try:
         workspace.ensure_dirs()
-        return {t.name for t in build_builtin_tools(workspace, "meta_probe")}
+        return {t.name for t in production_builtin_tools(workspace, "meta_probe")}
     finally:
         shutil.rmtree(workspace.root, ignore_errors=True)
 
@@ -351,8 +358,8 @@ class TestAssemblyWiring(unittest.TestCase):
                              thread_id="roster_asm_test")
             bound = llm_mock.bind_tools.call_args[0][0]
             names = [t.name for t in bound]
-            expected = [t.name for t in build_builtin_tools(workspace,
-                                                            "roster_asm_test")]
+            expected = [t.name for t in production_builtin_tools(workspace,
+                                                                 "roster_asm_test")]
             # 域工具紧随内置工厂产物、先于技能装配(默认装配技能为空)
             self.assertEqual(names, expected + ["peek_inbox"])
             peek = next(t for t in bound if t.name == "peek_inbox")
@@ -361,10 +368,12 @@ class TestAssemblyWiring(unittest.TestCase):
             self.assertEqual(peek.invoke({"hours": 1}), "empty")
 
     def test_production_domains_empty_until_first_domain(self):
-        """现状钉子:生产域为零(feishu 迁移是票 03 的对象)。
+        """现状钉子:registrars 接线表为零。
 
-        meta-test 1/2 的域侧覆盖随装配点接线表翻空为实——首域接线时
-        此断言翻红,提醒接线确认(不是阻力,是检查点)。
+        feishu(03 票已迁入域包)不走本表——其工具经 build_builtin_tools
+        参数插回迁移前原位,保装配顺序与改造前基线一致;两类来源(原位
+        参数注入 vs 表追加)的收口统一是票 04 的对象,届时本断言翻红
+        提醒接线确认(不是阻力,是检查点)。
         """
         from auditronclaw.core.agent import _DOMAIN_REGISTRARS
         self.assertEqual(_DOMAIN_REGISTRARS, ())

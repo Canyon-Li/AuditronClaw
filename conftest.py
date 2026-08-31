@@ -26,8 +26,9 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# 导入即登记：注册表条目挂在传输定义模块上
-from auditronclaw.core.tools import feishu_tool, mail_tool  # noqa: F401
+# 导入即登记：注册表条目挂在传输定义模块上（feishu 03 票起在域包）
+from auditronclaw.core.tools import mail_tool  # noqa: F401
+from auditronclaw.domains.feishu import tool as feishu_tool  # noqa: F401
 from auditronclaw.core.tools.egress import egress_channels
 from auditronclaw.core.logger import init_audit_logger
 

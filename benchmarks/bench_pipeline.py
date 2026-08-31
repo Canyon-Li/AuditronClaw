@@ -128,7 +128,7 @@ def mailbox_fixture(spec: dict, workspace: str):
     yield 捕获器(pushes 属性 = 已推送文本列表);退出时还原传输层与环境变量。
     """
     import auditronclaw.core.tools.mail_tool as mail_tool
-    import auditronclaw.core.tools.feishu_tool as feishu_tool
+    import auditronclaw.domains.feishu.tool as feishu_tool
 
     fixture_path = os.path.join(workspace, "bench_mailbox.json")
     now = datetime.now()

@@ -34,7 +34,7 @@ class TestMailboxFixtureSeam(unittest.TestCase):
 
     def test_fixture_roundtrip_and_restore(self):
         """进入:fixture 可读、推送被捕获、凭据为占位值;退出:生产通道与原环境还原"""
-        from auditronclaw.core.tools.feishu_tool import send_feishu_summary
+        from auditronclaw.domains.feishu.tool import send_feishu_summary
         from auditronclaw.core.tools.mail_tool import read_recent_emails
 
         # 预置非占位值:退出后必须还原(而非清空)——占位凭据不得污染运行环境
