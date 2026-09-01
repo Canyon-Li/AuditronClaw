@@ -1,8 +1,12 @@
 /* 终端页(05 票):WS 真流上屏——PromptBar 提交经 input 帧入队,回合事件
  * 实时驱动 ToolChips / StreamingText / LoadingState / Thinking;心跳回合
  * 客户端过滤(origin 字段,主视图只展示操作员回合);断线重连与刷新经
- * last_seq 补发不丢画面。审批卡交互动线(ApprovalCard ↔ decision 帧)
- * 随审批票接入,本页对 approval_request 呈现为事件行。
+ * last_seq 补发不丢画面。
+ * 07 票:审批动线接线——回合内 approval_request 事件落成审批卡(工具/
+ * 风险级/依据/完整参数 + 引擎超时倒计时,payload 带真实秒数),三选一经 decision 帧回填、同回合
+ * 续行;卡旁点开见该笔审计回执(审计旁路取数)。挂起的判定纯推导:审批
+ * 请求是回合末帧即待答,其后有事件即引擎侧已终局(不答即拒)。历史段
+ * (origin=history)不含审批过程事件,防御性以事件行呈现。
  * 06 票:重启重建段(origin=history)以分隔标注呈现在实时流之上,
  * 历史回合已收尾、不带运行态。 */
 
@@ -13,7 +17,9 @@ import LoadingState from "./components/LoadingState";
 import PromptBar from "./components/PromptBar";
 import StreamingText, { type StreamingToken } from "./components/StreamingText";
 import Thinking from "./components/Thinking";
-import type { Envelope } from "./protocol";
+import ApprovalCard, { type ApprovalChoice } from "./components/ApprovalCard";
+import ApprovalReceipt from "./components/ApprovalReceipt";
+import type { DecisionChoice, Envelope } from "./protocol";
 import { useTerminalStream } from "./useTerminalStream";
 
 // ============ 回合视图模型:信封流 → 操作员回合段 ============
@@ -62,7 +68,16 @@ function groupTurns(envelopes: Envelope[]): TurnModel {
   };
 }
 
-// ============ 事件 → 组件数据:工具步 / 回复帧 ============
+/** 回合是否挂着待答审批:末帧是 approval_request(引擎应答后续行,末帧
+ * 之外即已终局)。心跳回合构造上不产生审批卡(引擎保证,此为呈现层复验:
+ * 心跳段在 origin 过滤时已整体出主视图)。 */
+function pendingApprovalSeq(turn: TurnView): number | null {
+  if (turn.complete) return null;
+  const last = turn.events[turn.events.length - 1];
+  return last.type === "approval_request" ? last.seq : null;
+}
+
+// ============ 事件 → 组件数据:工具步 / 审批卡 / 回复帧 ============
 
 /* 图标按工具名猜读/写/执行,猜不中落执行态(展示层提示,分级以审批门为准) */
 const ICON_HINTS: [RegExp, string][] = [
@@ -83,7 +98,9 @@ function resultLines(result: string, cap = 500): ToolDetailLine[] {
   return text.split("\n").map((line) => ({ text: line }));
 }
 
-function stepsForTurn(events: Envelope[]): ToolStep[] {
+/** approval_request 事件是否落成工具步:历史段防御性呈现(存档不含审批
+ * 过程事件,不该出现;出现了也不给交互)。 */
+function stepsForTurn(events: Envelope[], approvalAsStep: boolean): ToolStep[] {
   const steps: ToolStep[] = [];
   for (const event of events) {
     if (event.type === "tool_call") {
@@ -95,10 +112,10 @@ function stepsForTurn(events: Envelope[]): ToolStep[] {
         detailMono: true,
         detail: [{ text: JSON.stringify(event.payload.args) }],
       });
-    } else if (event.type === "approval_request") {
+    } else if (approvalAsStep && event.type === "approval_request") {
       steps.push({
         icon: "think",
-        label: "审批请求(交互动线随审批票接入)",
+        label: "审批请求(历史段,交互不还原)",
         chip: event.payload.tool,
         mono: true,
         detailMono: false,
@@ -132,8 +149,30 @@ function stepsForTurn(events: Envelope[]): ToolStep[] {
   return steps;
 }
 
+/* 审批卡的码块正文:长文本参数(命令/脚本/内容)原文入块,其余参数成行;
+ * 没有可认的长文本参数时全量 JSON 入块(完整参数永远可见)。 */
+const SCRIPT_ARG_KEYS = ["command", "script", "code", "content", "cmd", "shell"];
+
+function approvalBody(args: Record<string, unknown>): {
+  script: string;
+  meta: string[];
+} {
+  const main = SCRIPT_ARG_KEYS.find(
+    (key) => typeof args[key] === "string" && args[key] !== "",
+  );
+  if (main) {
+    const rest = Object.entries(args).filter(([key]) => key !== main);
+    return {
+      script: args[main] as string,
+      meta: rest.map(([key, value]) => `${key}: ${JSON.stringify(value)}`),
+    };
+  }
+  return { script: JSON.stringify(args, null, 2), meta: [] };
+}
+
 type ReplyEvent = Extract<Envelope, { type: "reply" }>;
 type TurnErrorEvent = Extract<Envelope, { type: "turn_error" }>;
+type ApprovalEvent = Extract<Envelope, { type: "approval_request" }>;
 
 /** 逐字 55ms 会把长回复拖成分钟级:空白处切词,中日韩连续段按 2 字一帧。 */
 function tokenizeReply(content: string): StreamingToken[] {
@@ -151,24 +190,43 @@ const STATUS_TEXT: Record<string, string> = {
   reconnecting: "断线重连中…(已收事件重连后自动补发)",
 };
 
-function TurnSection({ turn, running }: { turn: TurnView; running: boolean }) {
-  const steps = useMemo(() => stepsForTurn(turn.events), [turn]);
-  const calls = turn.events.filter(
-    (event) => event.type === "tool_call" || event.type === "approval_request",
-  ).length;
+function TurnSection({
+  turn,
+  running,
+  token,
+  onDecision,
+  remountOf,
+}: {
+  turn: TurnView;
+  running: boolean;
+  token: string;
+  onDecision: (seq: number, choice: ApprovalChoice, stillPending: boolean) => void;
+  /** 应答未送达需重选的审批 seq(该卡重挂载复位,已选态撤回)。 */
+  remountOf: number | null;
+}) {
+  const steps = useMemo(
+    () => stepsForTurn(turn.events, turn.events[0].origin === "history"),
+    [turn],
+  );
+  const approvals = turn.events.filter(
+    (event): event is ApprovalEvent => event.type === "approval_request",
+  );
+  const pendingSeq = pendingApprovalSeq(turn);
+  const calls = turn.events.filter((event) => event.type === "tool_call").length;
   const replies = turn.events.filter(
     (event): event is ReplyEvent => event.type === "reply" && event.payload.final,
   );
   const error = turn.events.find(
     (event): event is TurnErrorEvent => event.type === "turn_error",
   );
+  const awaitingApproval = pendingSeq !== null;
 
   return (
     <section className="flex flex-col gap-2">
-      {running && steps.length === 0 && replies.length === 0 && (
+      {running && !awaitingApproval && steps.length === 0 && replies.length === 0 && (
         <LoadingState label="会话引擎运行中" variant="Drive" />
       )}
-      {running && <Thinking variant="Coding" />}
+      {running && !awaitingApproval && <Thinking variant="Coding" />}
       {steps.length > 0 && (
         <ToolChips
           steps={steps}
@@ -180,6 +238,33 @@ function TurnSection({ turn, running }: { turn: TurnView; running: boolean }) {
           }}
         />
       )}
+      {approvals.map((event) => {
+        // 审批请求之后还有事件 = 引擎侧已终局(不答即拒);是末帧即待答
+        const settled = event.seq !== pendingSeq;
+        const body = approvalBody(event.payload.args);
+        return (
+          <div key={event.seq} className="flex flex-col gap-1.5">
+            <ApprovalCard
+              key={event.seq === remountOf ? `${event.seq}:retry` : event.seq}
+              toolName={event.payload.tool}
+              script={body.script}
+              metaLines={body.meta}
+              riskClass={event.payload.risk_class}
+              reason={event.payload.reason}
+              timeoutSeconds={event.payload.timeout_seconds}
+              settledByTimeout={settled}
+              onDecision={(choice) => onDecision(event.seq, choice, !settled)}
+            />
+            {settled && (
+              <ApprovalReceipt
+                token={token}
+                tool={event.payload.tool}
+                args={event.payload.args}
+              />
+            )}
+          </div>
+        );
+      })}
       {replies.map((event) => (
         <StreamingText
           key={event.seq}
@@ -199,8 +284,16 @@ function TurnSection({ turn, running }: { turn: TurnView; running: boolean }) {
 }
 
 export default function TerminalPage({ token }: { token: string }) {
-  const { status, envelopes, protocolError, sendInput } = useTerminalStream(token);
+  const { status, envelopes, protocolError, sendInput, sendDecision } =
+    useTerminalStream(token);
   const model = useMemo(() => groupTurns(envelopes), [envelopes]);
+  const lastTurn = model.turns[model.turns.length - 1];
+  const pendingSeq = lastTurn ? pendingApprovalSeq(lastTurn) : null;
+
+  /* 审批应答未送达时撤回该卡已选态(key 换名重挂载),提示重连后重选;
+   * 引擎超时兜底,不会无限挂起 */
+  const [remountOf, setRemountOf] = useState<number | null>(null);
+  const [decisionLost, setDecisionLost] = useState<number | null>(null);
 
   /* 提交水位线:提交后到本回合首个事件前,队列/引擎侧在信封流上无痕迹,
    * 以已见操作员事件 seq 为水位,新事件出现即视为提交已开跑——纯推导,
@@ -211,7 +304,6 @@ export default function TerminalPage({ token }: { token: string }) {
   } | null>(null);
   const [undelivered, setUndelivered] = useState<string | null>(null);
   const pending = submitted !== null && submitted.atSeq >= model.lastHumanSeq;
-  const lastTurn = model.turns[model.turns.length - 1];
   const running = pending || (lastTurn !== undefined && !lastTurn.complete);
 
   const handleSend = (text: string) => {
@@ -224,6 +316,22 @@ export default function TerminalPage({ token }: { token: string }) {
     }
   };
 
+  const handleDecision = (
+    seq: number,
+    choice: DecisionChoice,
+    stillPending: boolean,
+  ) => {
+    if (!stillPending) return; // 引擎侧已终局:不发包(迟到的点选不作数)
+    if (sendDecision(choice)) {
+      setDecisionLost(null);
+      setRemountOf(null);
+    } else {
+      // 连接未就绪,应答没有送达:撤回已选态,重连后重选(不谎报已批准)
+      setDecisionLost(seq);
+      setRemountOf(seq);
+    }
+  };
+
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-105 flex-col gap-4 px-4 py-10">
       <header>
@@ -232,10 +340,16 @@ export default function TerminalPage({ token }: { token: string }) {
           回合事件实时上屏 · {STATUS_TEXT[status]}
           {model.backgroundEvents > 0 &&
             ` · 已过滤 ${model.backgroundEvents} 帧后台回合`}
+          {pendingSeq !== null && " · ⏸ 审批等待应答"}
         </p>
         {protocolError && (
           <p className="mt-0.5 font-mono text-[11px] text-red">
             上行帧被拒:{protocolError}
+          </p>
+        )}
+        {decisionLost !== null && (
+          <p className="mt-0.5 font-mono text-[11px] text-red">
+            审批应答未送达(连接未就绪):重连后请在审批卡上重选
           </p>
         )}
       </header>
@@ -251,7 +365,14 @@ export default function TerminalPage({ token }: { token: string }) {
           </p>
           <div className="flex flex-col gap-6 opacity-80">
             {model.historyTurns.map((turn) => (
-              <TurnSection key={turn.key} turn={turn} running={false} />
+              <TurnSection
+                key={turn.key}
+                turn={turn}
+                running={false}
+                token={token}
+                onDecision={handleDecision}
+                remountOf={remountOf}
+              />
             ))}
           </div>
         </section>
@@ -263,6 +384,9 @@ export default function TerminalPage({ token }: { token: string }) {
             key={turn.key}
             turn={turn}
             running={running && turn === lastTurn}
+            token={token}
+            onDecision={handleDecision}
+            remountOf={remountOf}
           />
         ))}
         {pending && submitted && (

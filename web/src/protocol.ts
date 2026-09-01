@@ -17,6 +17,9 @@ export type ApprovalRequestPayload = {
   args: Record<string, unknown>;
   risk_class: string;
   reason: string;
+  /** 引擎审批超时的真实值(服务端构造期读 AUDITRONCLAW_APPROVAL_TIMEOUT,
+   * 默认 300):倒计时以此为限,客户端不自设期限。 */
+  timeout_seconds: number;
 };
 export type TurnEndPayload = {
   tool_calls: { tool: string; args: Record<string, unknown> }[];
@@ -29,6 +32,7 @@ export type ProtocolErrorCode =
   | "bad_frame"
   | "unknown_type"
   | "input_empty"
+  | "decision_invalid"
   | "decision_unavailable";
 
 /** protocol_error 帧:服务进程自身产生,seq=0、origin="server",不入回合流。 */
@@ -51,7 +55,12 @@ export type Envelope =
   | { seq: number; type: "turn_error"; origin: StreamOrigin; payload: TurnErrorPayload }
   | ProtocolErrorEnvelope;
 
-/** 上行帧:input 入队成 human 回合;decision 为审批应答(接线随后续票)。 */
+/** 审批应答三选:once=允许一次 / always=永久允许(入规则生效)/ deny=拒绝。 */
+export type DecisionChoice = "once" | "always" | "deny";
+
+/** 上行帧:input 入队成 human 回合;decision 回填属主进程内挂起的审批,
+ * 同回合续行。挂起在服务进程不在连接上,断线重连/刷新后同一笔仍可应答;
+ * 不答即拒由引擎超时兜底。 */
 export type UpstreamMessage =
   | { type: "input"; text: string }
-  | { type: "decision"; choice: "once" | "always" | "deny" };
+  | { type: "decision"; choice: DecisionChoice };
