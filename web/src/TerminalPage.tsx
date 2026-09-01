@@ -1,24 +1,27 @@
 /* 终端页(05 票):WS 真流上屏——PromptBar 提交经 input 帧入队,回合事件
- * 实时驱动 ToolChips / StreamingText / LoadingState / Thinking;心跳回合
- * 客户端过滤(origin 字段,主视图只展示操作员回合);断线重连与刷新经
- * last_seq 补发不丢画面。
+ * 实时驱动 ToolChips / StreamingText;心跳回合客户端过滤(origin 字段,
+ * 主视图只展示操作员回合);断线重连与刷新经 last_seq 补发不丢画面。
  * 07 票:审批动线接线——回合内 approval_request 事件落成审批卡(工具/
  * 风险级/依据/完整参数 + 引擎超时倒计时,payload 带真实秒数),三选一经 decision 帧回填、同回合
  * 续行;卡旁点开见该笔审计回执(审计旁路取数)。挂起的判定纯推导:审批
  * 请求是回合末帧即待答,其后有事件即引擎侧已终局(不答即拒)。历史段
  * (origin=history)不含审批过程事件,防御性以事件行呈现。
  * 06 票:重启重建段(origin=history)以分隔标注呈现在实时流之上,
- * 历史回合已收尾、不带运行态。 */
+ * 历史回合已收尾、不带运行态。
+ * 10 票:视觉壳对齐操作员 v2 原型(2026-09-02)——毛玻璃 sticky 页头 + 状态
+ * pill 化(连接点色 / 审批等待 pulse / 后台帧计数,全前端可推导),阅读列
+ * 420px → 760px,输入条停靠式(sticky 底部 + 向下渐变),滚动跟随仅当操作员
+ * 已在底部(不打断回看);回合保留输入回显(WS 流不带操作员输入帧,回显
+ * 只覆盖本连接生命周期内提交的回合)。 */
 
-import { useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ToolDetailLine, ToolStep } from "./components/ToolChips";
 import ToolChips from "./components/ToolChips";
-import LoadingState from "./components/LoadingState";
 import PromptBar from "./components/PromptBar";
 import StreamingText, { type StreamingToken } from "./components/StreamingText";
-import Thinking from "./components/Thinking";
 import ApprovalCard, { type ApprovalChoice } from "./components/ApprovalCard";
 import ApprovalReceipt from "./components/ApprovalReceipt";
+import { ShieldIcon } from "./components/icons";
 import type { DecisionChoice, Envelope } from "./protocol";
 import { useTerminalStream } from "./useTerminalStream";
 
@@ -182,23 +185,59 @@ function tokenizeReply(content: string): StreamingToken[] {
     .map((text) => ({ text }));
 }
 
+// ============ 原型形态的小件:输入回显 / 等待三点 ============
+
+/** 回合首行的操作员输入回显(原型 .echo 形态)。 */
+function EchoLine({ text }: { text: string }) {
+  return (
+    <p className="font-mono text-[13px] leading-[1.6] text-ink-2 [overflow-wrap:anywhere]">
+      <span className="mr-2 select-none text-ink-3">❯</span>
+      {text}
+    </p>
+  );
+}
+
+/** 入队/引擎运行中的等待提示(原型 .pending 三点波形)。 */
+function PendingDots({ label }: { label: string }) {
+  return (
+    <div
+      role="status"
+      className="flex items-center gap-2.5 text-[12.5px] text-ink-3"
+    >
+      <span className="inline-flex gap-1" aria-hidden="true">
+        {[0, 150, 300].map((delay) => (
+          <span
+            key={delay}
+            className="size-[5px] rounded-full bg-ink-3"
+            style={{ animation: "wave 1.2s infinite", animationDelay: `${delay}ms` }}
+          />
+        ))}
+      </span>
+      {label}
+    </div>
+  );
+}
+
 // ============ 页面 ============
 
 const STATUS_TEXT: Record<string, string> = {
   connecting: "连接中…",
   open: "已连接",
-  reconnecting: "断线重连中…(已收事件重连后自动补发)",
+  reconnecting: "断线重连中…",
 };
 
 function TurnSection({
   turn,
   running,
+  echo,
   token,
   onDecision,
   remountOf,
 }: {
   turn: TurnView;
   running: boolean;
+  /** 本连接内提交、归属于该回合的操作员输入(刷新后 WS 流不带输入帧,无可回显)。 */
+  echo: string | null;
   token: string;
   onDecision: (seq: number, choice: ApprovalChoice, stillPending: boolean) => void;
   /** 应答未送达需重选的审批 seq(该卡重挂载复位,已选态撤回)。 */
@@ -222,11 +261,11 @@ function TurnSection({
   const awaitingApproval = pendingSeq !== null;
 
   return (
-    <section className="flex flex-col gap-2">
+    <section className="flex flex-col gap-2.5">
+      {echo && <EchoLine text={echo} />}
       {running && !awaitingApproval && steps.length === 0 && replies.length === 0 && (
-        <LoadingState label="会话引擎运行中" variant="Drive" />
+        <PendingDots label="会话引擎运行中" />
       )}
-      {running && !awaitingApproval && <Thinking variant="Coding" />}
       {steps.length > 0 && (
         <ToolChips
           steps={steps}
@@ -297,18 +336,64 @@ export default function TerminalPage({ token }: { token: string }) {
 
   /* 提交水位线:提交后到本回合首个事件前,队列/引擎侧在信封流上无痕迹,
    * 以已见操作员事件 seq 为水位,新事件出现即视为提交已开跑——纯推导,
-   * 不靠 effect 清标记 */
-  const [submitted, setSubmitted] = useState<{
-    atSeq: number;
-    text: string;
-  } | null>(null);
+   * 不靠 effect 清标记。sentLog 留住历次提交(水位线 + 文本):末条喂
+   * "已入队"提示(submitted),已开跑的继续作为各回合的输入回显 */
+  const [sentLog, setSentLog] = useState<{ atSeq: number; text: string }[]>([]);
+  const submitted = sentLog.length > 0 ? sentLog[sentLog.length - 1] : null;
   const [undelivered, setUndelivered] = useState<string | null>(null);
   const pending = submitted !== null && submitted.atSeq >= model.lastHumanSeq;
   const running = pending || (lastTurn !== undefined && !lastTurn.complete);
 
+  /* 回合回显配对:串行队列先提交先开跑,按序消费水位线之下的提交日志;
+   * 后端重启回卷(seq 回落)后,旧序数空间的悬挂条目永久配不上对,按当前
+   * 水位线剔除,不卡住后续配对 */
+  const echoByKey = useMemo(() => {
+    const byKey = new Map<number, string>();
+    const live = sentLog.filter((entry) => entry.atSeq <= model.lastHumanSeq);
+    let i = 0;
+    for (const turn of model.turns) {
+      const firstSeq = turn.events[0].seq;
+      if (i < live.length && live[i].atSeq < firstSeq) {
+        byKey.set(turn.key, live[i].text);
+        i++;
+      }
+    }
+    return byKey;
+  }, [model.turns, sentLog, model.lastHumanSeq]);
+
+  /* 滚动跟随(原型 nearBottom 语义):仅在操作员已在底部时跟随新内容,
+   * 回看历史时不打断;滚动位置由滚动事件记入 ref,新内容落地后按记档决定 */
+  const atBottomRef = useRef(true);
+  useEffect(() => {
+    const onScroll = () => {
+      atBottomRef.current =
+        window.innerHeight + window.scrollY >=
+        document.documentElement.scrollHeight - 140;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  useLayoutEffect(() => {
+    if (atBottomRef.current) {
+      window.scrollTo(0, document.documentElement.scrollHeight);
+    }
+  }, [envelopes.length, submitted]);
+
+  /* 流式回复按词上屏、详情行展开都在信封不变的情况下长高:回合运行中
+   * 以固定节拍续跟(仍在底部时),补齐信封驱动之外的跟随 */
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => {
+      if (atBottomRef.current) {
+        window.scrollTo(0, document.documentElement.scrollHeight);
+      }
+    }, 120);
+    return () => window.clearInterval(timer);
+  }, [running]);
+
   const handleSend = (text: string) => {
     if (sendInput(text)) {
-      setSubmitted({ atSeq: model.lastHumanSeq, text });
+      setSentLog((log) => [...log, { atSeq: model.lastHumanSeq, text }]);
       setUndelivered(null);
     } else {
       // 未入队不打"已入队":提示如实,消息不排队重发
@@ -333,81 +418,125 @@ export default function TerminalPage({ token }: { token: string }) {
   };
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-105 flex-col gap-4 px-4 py-10">
-      <header>
-        <h1 className="text-[15px] font-medium text-ink">AuditronClaw Web 终端</h1>
-        <p className="mt-0.5 text-[12px] text-ink-3">
-          回合事件实时上屏 · {STATUS_TEXT[status]}
-          {model.backgroundEvents > 0 &&
-            ` · 已过滤 ${model.backgroundEvents} 帧后台回合`}
-          {pendingSeq !== null && " · ⏸ 审批等待应答"}
-        </p>
-        {protocolError && (
-          <p className="mt-0.5 font-mono text-[11px] text-red">
-            上行帧被拒:{protocolError}
-          </p>
-        )}
-        {decisionLost !== null && (
-          <p className="mt-0.5 font-mono text-[11px] text-red">
-            审批应答未送达(连接未就绪):重连后请在审批卡上重选
-          </p>
+    <div className="flex min-h-screen flex-col">
+      <header
+        className="sticky top-0 z-40 border-b border-line-soft backdrop-blur-md"
+        style={{
+          background: "color-mix(in oklab, var(--page) 84%, transparent)",
+        }}
+      >
+        <div className="mx-auto flex w-full max-w-190 flex-wrap items-center gap-2.5 px-5 py-2.5 max-[600px]:px-3.5">
+          <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+            <span className="grid place-items-center text-accent">
+              <ShieldIcon size={16} />
+            </span>
+            <span>AuditronClaw</span>
+            <span className="h-3 w-px bg-line-strong" />
+            <span className="font-normal text-ink-2">Web 终端</span>
+          </div>
+          <div className="ml-auto flex flex-wrap gap-1.5">
+            <span className="inline-flex h-5.5 items-center gap-1.5 whitespace-nowrap rounded-chip bg-field px-2.25 font-mono text-[11.5px] text-ink-2 shadow-hairline">
+              <span
+                className={`size-1.5 rounded-full ${status === "open" ? "bg-green" : "bg-ink-3"}`}
+              />
+              {STATUS_TEXT[status]}
+            </span>
+            {pendingSeq !== null && (
+              <span className="inline-flex h-5.5 items-center gap-1.5 whitespace-nowrap rounded-chip bg-orange-tint px-2.25 font-mono text-[11.5px] text-orange">
+                <span
+                  className="size-1.5 rounded-full bg-orange"
+                  style={{ animation: "pulse 1.6s infinite" }}
+                />
+                审批等待应答
+              </span>
+            )}
+            {model.backgroundEvents > 0 && (
+              <span
+                title={`已过滤 ${model.backgroundEvents} 帧后台回合(心跳)`}
+                className="inline-flex h-5.5 items-center gap-1.5 whitespace-nowrap rounded-chip bg-field px-2.25 font-mono text-[11.5px] text-ink-2 shadow-hairline"
+              >
+                后台 {model.backgroundEvents} 帧
+              </span>
+            )}
+          </div>
+        </div>
+        {(protocolError || decisionLost !== null) && (
+          <div className="mx-auto w-full max-w-190 space-y-0.5 px-5 pb-1.5 font-mono text-[11px] text-red max-[600px]:px-3.5">
+            {protocolError && <p>上行帧被拒:{protocolError}</p>}
+            {decisionLost !== null && (
+              <p>审批应答未送达(连接未就绪):重连后请在审批卡上重选</p>
+            )}
+          </div>
         )}
       </header>
 
-      {model.turns.length === 0 && model.historyTurns.length === 0 && !pending && (
-        <p className="text-[12px] text-ink-3">尚无回合:输入消息开始第一个回合。</p>
-      )}
-
-      {model.historyTurns.length > 0 && (
-        <section className="flex flex-col gap-4">
-          <p className="text-[11px] text-ink-3">
-            —— 服务重启前的历史(自动从会话存档恢复,审批过程不还原)——
-          </p>
-          <div className="flex flex-col gap-6 opacity-80">
-            {model.historyTurns.map((turn) => (
-              <TurnSection
-                key={turn.key}
-                turn={turn}
-                running={false}
-                token={token}
-                onDecision={handleDecision}
-                remountOf={remountOf}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
-      <div className="flex flex-col gap-6">
-        {model.turns.map((turn) => (
-          <TurnSection
-            key={turn.key}
-            turn={turn}
-            running={running && turn === lastTurn}
-            token={token}
-            onDecision={handleDecision}
-            remountOf={remountOf}
-          />
-        ))}
-        {pending && submitted && (
-          <section className="flex flex-col gap-2">
-            <p className="font-mono text-[12.5px] text-ink-2">
-              <span className="text-ink-3">❯ </span>
-              {submitted.text}
+      <main className="mx-auto flex w-full max-w-190 flex-1 flex-col gap-6 px-5 pt-6.5 pb-[150px] max-[600px]:px-3.5 max-[600px]:pt-5 max-[600px]:pb-[130px]">
+        {model.turns.length === 0 &&
+          model.historyTurns.length === 0 &&
+          !pending && (
+            <p className="text-[12.5px] text-ink-3">
+              尚无回合:输入消息开始第一个回合。
             </p>
-            <LoadingState label="已入队,等待引擎回合" variant="Drive" />
+          )}
+
+        {model.historyTurns.length > 0 && (
+          <section className="opacity-[0.78]">
+            <p className="flex items-center gap-3 font-mono text-[11px] tracking-[0.06em] text-ink-3">
+              <span className="h-px flex-1 bg-line" />
+              服务重启前的历史 · 自动从会话存档恢复,审批过程不还原
+              <span className="h-px flex-1 bg-line" />
+            </p>
+            <div className="mt-6 flex flex-col gap-6">
+              {model.historyTurns.map((turn) => (
+                <TurnSection
+                  key={turn.key}
+                  turn={turn}
+                  running={false}
+                  echo={null}
+                  token={token}
+                  onDecision={handleDecision}
+                  remountOf={remountOf}
+                />
+              ))}
+            </div>
           </section>
         )}
-      </div>
 
-      {undelivered && status !== "open" && (
-        <p className="font-mono text-[11px] text-red">
-          未发送(连接未就绪,重连后请重发):{undelivered}
-        </p>
-      )}
+        <div className="flex flex-col gap-6">
+          {model.turns.map((turn) => (
+            <TurnSection
+              key={turn.key}
+              turn={turn}
+              running={running && turn === lastTurn}
+              echo={echoByKey.get(turn.key) ?? null}
+              token={token}
+              onDecision={handleDecision}
+              remountOf={remountOf}
+            />
+          ))}
+          {pending && submitted && (
+            <section className="flex flex-col gap-2.5">
+              <EchoLine text={submitted.text} />
+              <PendingDots label="已入队,等待引擎回合" />
+            </section>
+          )}
+        </div>
+      </main>
 
-      <div className="mt-auto pt-6">
-        <PromptBar demo={false} placeholder="输入消息,回车发送…" onSend={handleSend} />
+      <div
+        className="sticky bottom-0 z-50 px-5 pt-3.5 pb-[calc(16px+env(safe-area-inset-bottom))] max-[600px]:px-3.5 max-[600px]:pt-2.5 max-[600px]:pb-[calc(12px+env(safe-area-inset-bottom))]"
+        style={{
+          background: "linear-gradient(to top, var(--page) 62%, transparent)",
+        }}
+      >
+        <div className="mx-auto w-full max-w-190">
+          {undelivered && status !== "open" && (
+            <p className="mb-1.5 font-mono text-[11px] text-red">
+              未发送(连接未就绪,重连后请重发):{undelivered}
+            </p>
+          )}
+          <PromptBar placeholder="输入消息,回车发送…" onSend={handleSend} />
+        </div>
       </div>
     </div>
   );

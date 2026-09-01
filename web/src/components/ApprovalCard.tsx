@@ -4,6 +4,9 @@
  * Skip-Continue 页脚),改为单笔高危调用待批卡:允许一次/永久允许/拒绝 三选项 +
  * 倒计时与风险级/依据/参数行;站方 Button/GlideMenu 基元未随取件分发,以同视觉
  * 语言自绘;卡片骨架、入场动画、回执胶囊沿用原作形态。
+ * 10 票(2026-09-02):对齐操作员 v2 原型——卡片满列宽(760px 阅读列),
+ * 内距 14px/页脚 10×14px,已决态三按钮收起为结果胶囊(绿 ✓/红 ✗,pop-in),
+ * 触屏断点三按钮平分 44px 命中区。
  * 07 票接线语义:onDecision 只在操作员点选时触发(经 WS decision 帧回填);
  * 倒计时归零不发包——引擎超时才是权威,本地只收口显示,流上后续事件
  * (拒绝的 tool_result 等)经 settledByTimeout 复核收口。超时与手动拒绝的
@@ -49,7 +52,7 @@ const RESULT_STYLE: Record<ApprovalChoice, { pill: string; dot: string; icon: Re
   deny: { pill: "bg-red-tint text-red", dot: "bg-red", icon: <path d="M18 6L6 18M6 6l12 12" /> },
 };
 
-const ENTRY_ANIM = "fade-up 380ms cubic-bezier(0.23,1,0.32,1) both";
+const ENTRY_ANIM = "fade-up 300ms cubic-bezier(0.23,1,0.32,1) both";
 
 function formatClock(total: number) {
   const m = Math.floor(total / 60);
@@ -124,12 +127,12 @@ export default function ApprovalCard({
   const result = choice ? RESULT_STYLE[choice] : null;
 
   return (
-    <div className={`w-full max-w-105${className ? ` ${className}` : ""}`}>
+    <div className={`w-full${className ? ` ${className}` : ""}`}>
       <div
         className="overflow-hidden rounded-card bg-surface shadow-card"
         style={{ animation: ENTRY_ANIM }}
       >
-        <div className="primitive-card-pad">
+        <div className="p-3.5">
           {/* 标题行:待批工具 + 倒计时 */}
           <div className="flex items-center gap-2">
             <span className="text-[14px] font-medium text-ink">高危调用待审批</span>
@@ -171,48 +174,48 @@ export default function ApprovalCard({
               variant="Code"
               lines={script.split("\n")}
               filename={filename ?? `${toolName}.txt`}
-              labels={{ copy: "复制", copied: "已复制" }}
+              labels={{ copy: "复制", copied: "已复制", failed: "复制失败" }}
             />
           </div>
         </div>
 
-        {/* footer — 三选项;已决出则回显胶囊 */}
-        <div className="primitive-card-footer flex items-center justify-end gap-1.5 border-t border-line">
+        {/* footer — 三选项;已决出则回显胶囊;触屏断点三按钮平分 44px 命中区 */}
+        <div className="flex flex-wrap items-center justify-end gap-1.5 border-t border-line px-3.5 py-2.5">
           {!result ? (
             <>
               <button
                 type="button"
                 onClick={() => decide("deny")}
-                className="flex h-7 items-center rounded-control px-2.5 text-[12.5px] font-medium text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink"
+                className="flex h-7 items-center rounded-control px-3 text-[12.5px] font-medium text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink max-[600px]:h-11 max-[600px]:min-w-0 max-[600px]:flex-1"
               >
                 {t.deny}
               </button>
               <button
                 type="button"
                 onClick={() => decide("once")}
-                className="flex h-7 items-center rounded-control bg-surface px-2.5 text-[12.5px] font-medium text-ink shadow-btn transition-colors duration-100 hover:bg-hover"
+                className="flex h-7 items-center rounded-control bg-surface px-3 text-[12.5px] font-medium text-ink shadow-btn transition-colors duration-100 hover:bg-hover max-[600px]:h-11 max-[600px]:min-w-0 max-[600px]:flex-1"
               >
                 {t.allowOnce}
               </button>
               <button
                 type="button"
                 onClick={() => decide("always")}
-                className="flex h-7 items-center rounded-control bg-green-tint px-2.5 text-[12.5px] font-medium text-green transition-opacity duration-100 hover:opacity-90"
+                className="flex h-7 items-center rounded-control bg-green-tint px-3 text-[12.5px] font-medium text-green transition-opacity duration-100 hover:opacity-90 max-[600px]:h-11 max-[600px]:min-w-0 max-[600px]:flex-1"
               >
                 {t.allowAlways}
               </button>
             </>
           ) : (
             <span
-              className={`inline-flex items-center gap-1.5 rounded-full py-1 pr-2.5 pl-1 text-[12.5px] font-medium ${result.pill}`}
+              className={`inline-flex h-6.5 items-center gap-[7px] rounded-full pr-[11px] pl-[5px] text-[12.5px] font-medium ${result.pill}`}
               style={{ animation: "pop-in 260ms cubic-bezier(0.23,1,0.32,1) both" }}
             >
               <span
-                className={`flex size-4.5 items-center justify-center rounded-full text-white ${result.dot}`}
+                className={`flex size-[17px] items-center justify-center rounded-full text-white ${result.dot}`}
               >
                 <svg
-                  width="11"
-                  height="11"
+                  width="10"
+                  height="10"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
