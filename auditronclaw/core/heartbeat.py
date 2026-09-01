@@ -43,7 +43,7 @@ def _next_occurrence(target_dt: datetime, repeat: str) -> datetime:
     return target_dt.replace(year=year, month=month, day=day)
 
 
-async def pacemaker_loop(task_queue: asyncio.Queue, tasks_file: str, check_interval: int = 10):
+async def pacemaker_loop(task_queue: asyncio.Queue, tasks_file: str, check_interval: float = 10):
     """
     后台心脏起搏器协程（带并发锁和循环任务续期功能）。
 
