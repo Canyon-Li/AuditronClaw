@@ -8,15 +8,16 @@ payload},Q16)存事件,浏览器特有物不进缓存。
 
 部件边界:
 - EventCache:回合事件的有界环形缓冲,seq 进程内单调——快照端点与
-  后续断线补发(携 last_seq 取增量)共用的数据面
+  断线补发(携 last_seq 取增量)共用的数据面
 - AuditTap:log_event 只读订阅者的进程内缓冲,审计条目经 REST 查询;
   JSONL 写路径零改动,文件保持纯档案职责(Q14)
 - BackendOwner:装配与生命周期——start 挂旁路、起 worker 与 pacemaker;
   stop 撤旁路、收任务、关资源。回合异常落缓存为 turn_error 事件,
-  不杀 worker(单 worker 不被一条坏回合堵死)
+  不杀 worker(单 worker 不被一条坏回合堵死)。事件落缓存即向在线
+  WS 连接广播(subscribe/unsubscribe,见 entry.web_ws)
 
 审计落点由调用方先行 init_audit_logger(属主只订阅,不初始化)。
-审批应答通道(05/07 票接线前)不注入:人来源回合的必批调用按无人拒。
+审批应答通道(07 票接线前)不注入:人来源回合的必批调用按无人拒。
 """
 import asyncio
 import itertools
@@ -47,6 +48,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_CACHE_SIZE = 1000
 DEFAULT_AUDIT_BUFFER = 1000
 DEFAULT_CHECK_INTERVAL = 10.0
+# 单连接实时队列上界:慢消费者丢帧不堵 worker,客户端凭 seq 校验发现
+# 缺口后携 last_seq=0 整段重建(契约见 entry.web_ws)
+SUBSCRIBER_QUEUE_MAX = 256
 
 
 # ============ 事件缓存:有界环形缓冲,seq 单调 ============
@@ -161,7 +165,34 @@ class BackendOwner:
         self.queue: "asyncio.Queue[TurnRequest | str]" = asyncio.Queue()
         self._resources = resources
         self._tasks: list[asyncio.Task] = []
+        self._subscribers: "set[asyncio.Queue[CachedEvent]]" = set()
         self._unsubscribe_audit: Optional[Callable[[], None]] = None
+
+    # ============ 实时广播:事件落缓存即扇出到在线 WS 连接 ============
+
+    def subscribe(self) -> "asyncio.Queue[CachedEvent]":
+        """注册实时订阅(WS 连接建立时调用):此后的新事件即时入队。
+
+        连接即补发的次序约定:先 subscribe 再取快照——快照与队列之间
+        竞态窗口内的事件两处都有,消费端按 seq 去重(entry.web_ws)。
+        """
+        queue: "asyncio.Queue[CachedEvent]" = asyncio.Queue(
+            maxsize=SUBSCRIBER_QUEUE_MAX)
+        self._subscribers.add(queue)
+        return queue
+
+    def unsubscribe(self, queue: "asyncio.Queue[CachedEvent]") -> None:
+        self._subscribers.discard(queue)
+
+    def _broadcast(self, event: CachedEvent) -> None:
+        """扇出至全部订阅队列:不阻塞 worker,满队列丢帧由客户端自愈。"""
+        for queue in list(self._subscribers):
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                # 慢消费者:丢的是这一连接的实时性,不是缓存;客户端按
+                # seq 校验发现缺口后携 last_seq=0 重连整段重建
+                pass
 
     async def start(self) -> None:
         """起属主:先挂审计旁路(不漏事件),再起 worker 与 pacemaker。"""
@@ -208,12 +239,13 @@ class BackendOwner:
             try:
                 async for event in self.engine.run_turn(text, origin=origin):
                     type_, payload = serialize_turn_event(event)
-                    self.cache.append(type_, origin.value, payload)
+                    self._broadcast(self.cache.append(type_, origin.value, payload))
             except Exception as exc:
                 # CancelledError 不在此列:取消即属主停机,原样上抛交 stop 收口
                 logger.warning("回合异常(worker 继续运行): %r", exc)
-                self.cache.append("turn_error", origin.value,
-                                  {"error": f"{type(exc).__name__}: {exc}"})
+                self._broadcast(self.cache.append(
+                    "turn_error", origin.value,
+                    {"error": f"{type(exc).__name__}: {exc}"}))
             finally:
                 self.queue.task_done()
 
@@ -226,7 +258,7 @@ def assemble_backend_owner(*, thread_id: str, provider_name: str,
 
     返回 async 工厂——引擎的 checkpointer(AsyncSqliteSaver)是异步资源,
     在 FastAPI lifespan 的运行环里构造;stop 经 AsyncExitStack 统一收口。
-    审批应答通道未注入(05/07 票接线),人来源回合必批调用现按无人拒。
+    审批应答通道未注入(07 票接线),人来源回合必批调用现按无人拒。
     """
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 

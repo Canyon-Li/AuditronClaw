@@ -1,10 +1,10 @@
 """Web 终端后端:token 鉴权中间件 + web/dist 静态托管 + 属主 REST 端点。
 
 本进程即唯一属主(引擎/队列/心跳在 lifespan 内装配,见 entry/web_owner);
-浏览器是它的客户端。REST 承载静态资源、启动快照与审计流查询(Q16);
-WS 契约随后续票接入。威胁模型是 localhost 绑定 + token——堵恶意网页
-对 127.0.0.1 的 CSRF/DNS rebinding 替点审批;token 由启动入口随机
-生成并打印,REST 与 WS 握手走同一中间件校验。
+浏览器是它的客户端。REST 承载静态资源、启动快照与审计流查询,实时
+回合流走 WS(契约定稿见 entry/web_ws)。威胁模型是 localhost 绑定 +
+token——堵恶意网页对 127.0.0.1 的 CSRF/DNS rebinding 替点审批;token
+由启动入口随机生成并打印,REST 与 WS 握手走同一中间件校验。
 """
 
 from __future__ import annotations
@@ -20,6 +20,8 @@ from urllib.parse import parse_qsl
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.staticfiles import StaticFiles
+
+from entry.web_ws import register_ws_route
 
 if TYPE_CHECKING:
     from entry.web_owner import BackendOwner
@@ -137,10 +139,11 @@ def create_web_app(token: str, static_dir: Path | str | None = None,
     )
     app.add_middleware(TokenAuthMiddleware, token=token)
     _register_owner_routes(app)
+    register_ws_route(app)
 
     directory = Path(static_dir) if static_dir is not None else DEFAULT_STATIC_DIR
     if directory.is_dir():
-        # API 路由先于 "/" 挂载注册,静态兜底不影响 /api/* 命中
+        # API 路由先于 "/" 挂载注册,静态兜底不影响 /api/* 与 /ws 命中
         app.mount("/", StaticFiles(directory=directory, html=True), name="web")
         return app
 
