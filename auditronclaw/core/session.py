@@ -152,6 +152,21 @@ class SessionEngine:
                                     source=DecisionSource.UNATTENDED)
         return ensure_decision(decision)
 
+    async def archived_messages(self) -> List:
+        """读 checkpointer 存档的会话消息(重启历史重建的取数面)。
+
+        app 无 checkpointer 或线程无存档时返回空列表——拿不到事实就
+        空手而归,不猜。读取走 aget_state 最新快照,不触发任何图执行;
+        读路径不构造 turn_origin(不涉审批门,与 run_turn 的写配置分开)。
+        """
+        if getattr(self.app, "checkpointer", None) is None:
+            return []
+        state = await self.app.aget_state(
+            {"configurable": {"thread_id": self.thread_id}})
+        if state is None:
+            return []
+        return (state.values or {}).get("messages", [])
+
     async def run_turn(self, text: str,
                        origin: TurnOrigin = TurnOrigin.UNATTENDED
                        ) -> AsyncIterator[TurnEvent]:

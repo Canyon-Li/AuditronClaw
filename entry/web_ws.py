@@ -12,11 +12,14 @@
 - type:五种回合事件(tool_call/tool_result/reply/approval_request/
   turn_end)+ turn_error(回合异常)+ protocol_error(上行帧处理错误)
 - 回合事件的 origin 取回合来源(human/heartbeat/bench/unattended),
-  客户端按 origin 过滤——心跳回合主视图不展示
+  客户端按 origin 过滤——心跳回合主视图不展示;重启重建的事件
+  origin="history"(06 票:缓存空时从 checkpointer 消息级重建播入缓存,
+  与实时流可区分;存档查不到各回合来源,重建不猜来源)
 - protocol_error 由服务进程自身产生:seq=0(不与流事件冲突,流自 1 起)、
   origin="server",不入事件缓存
 - seq:进程内单调、从 1 起,仅后端进程重启回卷;重启后的历史重建
-  (checkpointer 消息级)归 06 票,重建事件同样自 seq 1 重新编号
+  (checkpointer 消息级,见 entry.web_owner)同样自 seq 1 重新编号,
+  历史段先于实时段落缓存
 
 连接语义(断线补发与刷新不丢画面)
 - 连接即补发:先发缓存中 seq > last_seq 的事件再进实时段;last_seq

@@ -2,7 +2,9 @@
  * 实时驱动 ToolChips / StreamingText / LoadingState / Thinking;心跳回合
  * 客户端过滤(origin 字段,主视图只展示操作员回合);断线重连与刷新经
  * last_seq 补发不丢画面。审批卡交互动线(ApprovalCard ↔ decision 帧)
- * 随审批票接入,本页对 approval_request 呈现为事件行。 */
+ * 随审批票接入,本页对 approval_request 呈现为事件行。
+ * 06 票:重启重建段(origin=history)以分隔标注呈现在实时流之上,
+ * 历史回合已收尾、不带运行态。 */
 
 import { useMemo, useState } from "react";
 import type { ToolDetailLine, ToolStep } from "./components/ToolChips";
@@ -24,6 +26,7 @@ type TurnView = {
 };
 
 type TurnModel = {
+  historyTurns: TurnView[]; // 重启重建段(origin=history,后端重启前已收尾的回合)
   turns: TurnView[]; // 仅操作员回合(心跳等后台回合过滤,计数另报)
   lastHumanSeq: number; // 最近一帧操作员事件的 seq(提交水位线的对照)
   backgroundEvents: number; // 被过滤的后台帧数(呈现层可交代心跳在跑)
@@ -41,12 +44,18 @@ function groupTurns(envelopes: Envelope[]): TurnModel {
       all.push({ key: event.seq, events: [event], complete: settled });
     }
   }
-  const turns = all.filter((turn) => turn.events[0].origin === "human");
-  const backgroundEvents = all
-    .filter((turn) => turn.events[0].origin !== "human")
-    .reduce((count, turn) => count + turn.events.length, 0);
+  const historyTurns: TurnView[] = [];
+  const turns: TurnView[] = [];
+  let backgroundEvents = 0;
+  for (const turn of all) {
+    const origin = turn.events[0].origin;
+    if (origin === "history") historyTurns.push(turn);
+    else if (origin === "human") turns.push(turn);
+    else backgroundEvents += turn.events.length;
+  }
   const lastTurn = turns[turns.length - 1];
   return {
+    historyTurns,
     turns,
     lastHumanSeq: lastTurn ? lastTurn.events[lastTurn.events.length - 1].seq : 0,
     backgroundEvents,
@@ -231,8 +240,21 @@ export default function TerminalPage({ token }: { token: string }) {
         )}
       </header>
 
-      {model.turns.length === 0 && !pending && (
+      {model.turns.length === 0 && model.historyTurns.length === 0 && !pending && (
         <p className="text-[12px] text-ink-3">尚无回合:输入消息开始第一个回合。</p>
+      )}
+
+      {model.historyTurns.length > 0 && (
+        <section className="flex flex-col gap-4">
+          <p className="text-[11px] text-ink-3">
+            —— 服务重启前的历史(自动从会话存档恢复,审批过程不还原)——
+          </p>
+          <div className="flex flex-col gap-6 opacity-80">
+            {model.historyTurns.map((turn) => (
+              <TurnSection key={turn.key} turn={turn} running={false} />
+            ))}
+          </div>
+        </section>
       )}
 
       <div className="flex flex-col gap-6">
