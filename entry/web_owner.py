@@ -9,12 +9,15 @@ payload},Q16)存事件,浏览器特有物不进缓存。
 部件边界:
 - EventCache:回合事件的有界环形缓冲,seq 进程内单调——快照端点与
   断线补发(携 last_seq 取增量)共用的数据面
+- history_events_from_messages:重启历史粗重建的纯映射(Q15)——存档
+  消息 → 消息级事件;缓存空时由属主在启动期播回缓存,REST 快照与
+  WS 重放两条读取路径即见历史,浏览器刷新不白屏
 - AuditTap:log_event 只读订阅者的进程内缓冲,审计条目经 REST 查询;
   JSONL 写路径零改动,文件保持纯档案职责(Q14)
-- BackendOwner:装配与生命周期——start 挂旁路、起 worker 与 pacemaker;
-  stop 撤旁路、收任务、关资源。回合异常落缓存为 turn_error 事件,
-  不杀 worker(单 worker 不被一条坏回合堵死)。事件落缓存即向在线
-  WS 连接广播(subscribe/unsubscribe,见 entry.web_ws)
+- BackendOwner:装配与生命周期——start 挂旁路、播历史(缓存空时)、
+  起 worker 与 pacemaker;stop 撤旁路、收任务、关资源。回合异常落缓存
+  为 turn_error 事件,不杀 worker(单 worker 不被一条坏回合堵死)。
+  事件落缓存即向在线 WS 连接广播(subscribe/unsubscribe,见 entry.web_ws)
 
 审计落点由调用方先行 init_audit_logger(属主只订阅,不初始化)。
 审批应答通道(07 票接线前)不注入:人来源回合的必批调用按无人拒。
@@ -26,7 +29,9 @@ import threading
 from collections import deque
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Iterable, Optional
+
+from langchain_core.messages import AnyMessage
 
 from auditronclaw.core.bus import TurnRequest
 from auditronclaw.core.config import WorkspaceConfig
@@ -41,6 +46,7 @@ from auditronclaw.core.session import (
     ToolResult,
     TurnEnd,
     TurnEvent,
+    TurnTrajectory,
 )
 
 logger = logging.getLogger(__name__)
@@ -90,6 +96,67 @@ def serialize_turn_event(event: TurnEvent) -> tuple[str, dict]:
             "reply": trajectory.reply,
         }
     raise TypeError(f"未知回合事件类型: {type(event).__name__}")
+
+
+# ============ 重启历史重建:checkpointer 存档 → 消息级事件 ============
+#
+# 后端进程重启后事件缓存为空,浏览器重连即白屏(Q15)。会话的持久事实
+# 在 checkpointer 的消息存档里——从这里做消息级粗重建播回缓存。
+
+HISTORY_ORIGIN = "history"
+"""重建事件的 origin 标记:与实时流(human/heartbeat/…)可区分,客户端
+据此把历史段与实时段分开呈现。存档里查不到各回合的来源(心跳与操作员
+在消息上同形),重建不做来源猜测,一律标 history。"""
+
+
+def history_events_from_messages(messages: "Iterable[AnyMessage]") -> list[TurnEvent]:
+    """存档消息 → 回合事件序列:与实时流同一事件类型(经 serialize_turn_event
+    落成同一信封形状)的消息级粗重建。
+
+    与实时流的差别(不逐字复刻):审批过程事件(approval_request)不在
+    存档里,自然不重建;回合输入文本不单独成事件(实时流本就没有这一型)。
+    HumanMessage 分段回合,段尾补 turn_end——轨迹聚合与实时流同形,重启
+    时跑到一半的回合按存档现状收口(该回合不会续跑,turn_end 如实交代
+    已发生的轨迹)。
+    """
+    events: list[TurnEvent] = []
+    turn_events: list[TurnEvent] = []
+    tool_calls: list[dict] = []
+    tool_results: list[dict] = []
+    reply_text: list[str] = []
+
+    def close_turn() -> None:
+        nonlocal turn_events, tool_calls, tool_results, reply_text
+        if turn_events:
+            events.extend(turn_events)
+            events.append(TurnEnd(trajectory=TurnTrajectory(
+                tool_calls=tool_calls,
+                tool_results=tool_results,
+                reply="\n".join(reply_text),
+            )))
+        turn_events, tool_calls, tool_results, reply_text = [], [], [], []
+
+    for msg in messages:
+        kind = getattr(msg, "type", "")
+        if kind == "human":
+            close_turn()  # 存档里的回合边界(操作员输入与心跳系统消息同形)
+        elif kind == "ai":
+            calls = getattr(msg, "tool_calls", None) or []
+            for tc in calls:
+                args = tc.get("args", {})
+                turn_events.append(ToolCall(name=tc["name"], args=args))
+                tool_calls.append({"tool": tc["name"], "args": args})
+            if msg.content:  # 与引擎 reply 语义同构:content 真值即发,final=无调用
+                turn_events.append(Reply(content=str(msg.content),
+                                         final=not calls))
+                reply_text.append(str(msg.content))
+        elif kind == "tool":
+            result = str(msg.content)
+            turn_events.append(ToolResult(tool=msg.name, result=result))
+            tool_results.append({"tool": msg.name, "result": result})
+        # 其余类型(system 等按理不进存档):跳过,不虚构事件
+    close_turn()
+    return events
 
 
 class EventCache:
@@ -195,14 +262,39 @@ class BackendOwner:
                 pass
 
     async def start(self) -> None:
-        """起属主:先挂审计旁路(不漏事件),再起 worker 与 pacemaker。"""
+        """起属主:先挂审计旁路(不漏事件),空缓存播入重启历史(次序先于
+        实时事件),再起 worker 与 pacemaker。"""
         self._unsubscribe_audit = get_audit_logger().add_subscriber(self.audit_tap)
+        await self._seed_history()
         self._tasks = [
             asyncio.create_task(self._worker_loop()),
             asyncio.create_task(pacemaker_loop(
                 task_queue=self.queue, tasks_file=self.tasks_file,
                 check_interval=self.check_interval)),
         ]
+
+    async def _seed_history(self) -> None:
+        """重启历史粗重建(Q15):缓存空时把存档消息历史播入缓存——快照
+        端点与 WS 重放共用缓存,浏览器刷新即见。取数经引擎的
+        archived_messages(会话存档的读取面,见 core.session)。
+
+        快路径:缓存命中(非空)即跳过——重建只在启动期、缓存为空时至多
+        一次,历史事件先于一切实时事件落缓存,两段次序天然分明。重建
+        失败不杀启动:告警后以空历史续起(白屏可忍,服务不可用不可忍)。
+        """
+        if self.cache.snapshot():
+            return
+        read_archive = getattr(self.engine, "archived_messages", None)
+        if read_archive is None:
+            return
+        try:
+            messages = await read_archive()
+        except Exception as exc:
+            logger.warning("重启历史重建失败(以空历史续起): %r", exc)
+            return
+        for event in history_events_from_messages(messages):
+            type_, payload = serialize_turn_event(event)
+            self.cache.append(type_, HISTORY_ORIGIN, payload)
 
     async def stop(self) -> None:
         """收属主:撤旁路、收任务、关资源。幂等,未 start 时为空操作。"""
