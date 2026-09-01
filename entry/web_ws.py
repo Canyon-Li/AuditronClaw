@@ -15,6 +15,9 @@
   客户端按 origin 过滤——心跳回合主视图不展示;重启重建的事件
   origin="history"(06 票:缓存空时从 checkpointer 消息级重建播入缓存,
   与实时流可区分;存档查不到各回合来源,重建不猜来源)
+- approval_request 的 payload 带 timeout_seconds:引擎审批超时的真实值
+  (构造期读 AUDITRONCLAW_APPROVAL_TIMEOUT,默认 300)——不答即拒的
+  期限在引擎,客户端倒计时以此为限,不自设期限
 - protocol_error 由服务进程自身产生:seq=0(不与流事件冲突,流自 1 起)、
   origin="server",不入事件缓存
 - seq:进程内单调、从 1 起,仅后端进程重启回卷;重启后的历史重建
@@ -37,14 +40,20 @@
   入队成 human 回合(与心跳同队列串行消费);空/空白/非字符串按
   input_empty 拒
 - {"type": "decision", "choice": "once" | "always" | "deny"}
-  审批应答,07 票接线;当前无挂起审批可应答,回
-  protocol_error(decision_unavailable)
+  审批应答(07 票接线):choice 三选映射 ApprovalDecision——once=允许
+  一次(user_once)、always=永久允许(user_persist,门内入规则生效)、
+  deny=拒绝(人的明确拒绝,同为 user_once)。回填属主进程内挂起的审批
+  future,引擎同回合续行;挂起在属主不在连接上,断线重连/刷新后同一笔
+  仍可应答。无挂起或已终局(超时已拒)回 protocol_error
+  (decision_unavailable);choice 缺失或不认识按 decision_invalid 拒,
+  不悄悄默认任何档位
 
 错误码(protocol_error.payload.code)
 - bad_frame             非 JSON / 非对象 / 缺 type
 - unknown_type          type 不在 input | decision
 - input_empty           input 帧无有效文本
-- decision_unavailable  当前无挂起审批可应答
+- decision_invalid      decision 帧 choice 缺失或不在 once | always | deny
+- decision_unavailable  当前无挂起审批可应答(或已终局)
 
 ping/pong
 - 无应用层 ping:保活交给 WebSocket 协议层(uvicorn 默认 20s 间隔
@@ -61,6 +70,8 @@ from typing import TYPE_CHECKING, Optional
 
 from fastapi import WebSocket
 
+from entry.web_approval import parse_decision_choice
+
 if TYPE_CHECKING:
     from entry.web_owner import BackendOwner, CachedEvent
 
@@ -75,6 +86,7 @@ PROTOCOL_ERROR_ORIGIN = "server"
 CODE_BAD_FRAME = "bad_frame"
 CODE_UNKNOWN_TYPE = "unknown_type"
 CODE_INPUT_EMPTY = "input_empty"
+CODE_DECISION_INVALID = "decision_invalid"
 CODE_DECISION_UNAVAILABLE = "decision_unavailable"
 
 _NO_OWNER_CLOSE_CODE = 1011
@@ -168,8 +180,13 @@ async def _handle_upstream(raw: str, owner: "BackendOwner") -> Optional[str]:
         await owner.submit(text)
         return None
     if frame["type"] == "decision":
-        # 契约已定、接线在 07:当前无挂起审批可应答
-        return CODE_DECISION_UNAVAILABLE
+        decision = parse_decision_choice(frame.get("choice"))
+        if decision is None:
+            return CODE_DECISION_INVALID
+        if not owner.answer_approval(decision):
+            # 无挂起或已终局(超时已拒):答案弃置,不复活审批
+            return CODE_DECISION_UNAVAILABLE
+        return None
     return CODE_UNKNOWN_TYPE
 
 

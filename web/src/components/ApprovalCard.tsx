@@ -2,20 +2,21 @@
  * 组件名 Approval Card · 取用日期 2026-09-01 · MIT · Copyright (c) 2026 Shane Levine
  * 本仓改动:按 Web 终端审批动线改造——原作是多题问答卡(翻题/滚轮计数/自定义答案/
  * Skip-Continue 页脚),改为单笔高危调用待批卡:允许一次/永久允许/拒绝 三选项 +
- * 倒计时,不答即拒绝(超时与手动拒绝的回显同为"✗ 已拒绝",来源区别走审计
- * 回执的 source 字段);站方 Button/GlideMenu 基元未随取件分发,以同视觉语言自绘;
- * 卡片骨架、入场动画、回执胶囊沿用原作形态。 */
+ * 倒计时与风险级/依据/参数行;站方 Button/GlideMenu 基元未随取件分发,以同视觉
+ * 语言自绘;卡片骨架、入场动画、回执胶囊沿用原作形态。
+ * 07 票接线语义:onDecision 只在操作员点选时触发(经 WS decision 帧回填);
+ * 倒计时归零不发包——引擎超时才是权威,本地只收口显示,流上后续事件
+ * (拒绝的 tool_result 等)经 settledByTimeout 复核收口。超时与手动拒绝的
+ * 回显同为"✗ 已拒绝",来源区别走审计回执的 source 字段。 */
 
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
 import CodeBlock from "./CodeBlock";
+import type { DecisionChoice } from "../protocol";
 
-/** 三种审批决定,与引擎侧 ApprovalDecision 对齐(接线归 05 票)。 */
-export type ApprovalChoice = "once" | "always" | "deny";
-
-/** 决定来源:操作员点选,或倒计时到点自动拒绝(不答即拒、拒绝留痕)。 */
-export type ApprovalSource = "operator" | "timeout";
+/** 三种审批决定,与 WS 契约的 decision 帧 choice 对齐(权威在 entry/web_ws)。 */
+export type ApprovalChoice = DecisionChoice;
 
 export type ApprovalLabels = {
   allowOnce: string;
@@ -60,49 +61,63 @@ export default function ApprovalCard({
   toolName,
   script,
   filename,
+  riskClass,
+  reason,
+  metaLines = [],
   timeoutSeconds = 300,
+  settledByTimeout = false,
   labels,
   onDecision,
   className,
 }: {
   /** 待批工具调用名,如 "bash"。 */
   toolName: string;
-  /** 待执行脚本全文,行号化全文入卡。 */
+  /** 待执行脚本/参数全文,行号化全文入卡。 */
   script: string;
   /** 脚本文件名(CodeBlock 头展示)。 */
   filename?: string;
-  /** 超时秒数;到点未答按拒绝收场。 */
+  /** 风险级(副作用分级),如 write / execute。 */
+  riskClass?: string;
+  /** 分级依据(人批的是具体动作,不是类别印象)。 */
+  reason?: string;
+  /** 除脚本外的其余参数行(如 filepath: "reports/daily.md")。 */
+  metaLines?: string[];
+  /** 超时秒数;到点未答,引擎按拒绝收场。 */
   timeoutSeconds?: number;
+  /** 回合已越过此审批而卡上无操作员决定:引擎侧已终局(不答即拒),卡面收口。 */
+  settledByTimeout?: boolean;
   labels?: Partial<ApprovalLabels>;
-  /** 决定回调:操作员点选或超时自动拒绝时触发一次。 */
-  onDecision?: (choice: ApprovalChoice, source: ApprovalSource) => void;
+  /** 决定回调:操作员点选时触发一次(倒计时归零不触发,引擎超时是权威)。 */
+  onDecision?: (choice: ApprovalChoice) => void;
   className?: string;
 }) {
   const t = { ...DEFAULT_LABELS, ...labels };
-  const [choice, setChoice] = useState<ApprovalChoice | null>(null);
-  const [byTimeout, setByTimeout] = useState(false);
+  const [picked, setPicked] = useState<ApprovalChoice | null>(null);
+  const [expired, setExpired] = useState(false); // 本地倒计时归零
   const [left, setLeft] = useState(timeoutSeconds);
+
+  /* 卡面已决态纯推导:操作员点选 > 引擎侧终局(流上收口,不答即拒)>
+   * 本地倒计时归零(只收口显示,引擎超时才是权威)。 */
+  const choice: ApprovalChoice | null =
+    picked ?? (settledByTimeout || expired ? "deny" : null);
+  const byTimeout = picked === null && (settledByTimeout || expired);
 
   useEffect(() => {
     if (choice) return;
     const timer = setTimeout(() => {
       if (left <= 1) {
-        // 不答即拒:倒计时归零,终局拒绝并留痕(超时来源)
-        setByTimeout(true);
-        setChoice("deny");
-        onDecision?.("deny", "timeout");
+        setExpired(true);
         return;
       }
       setLeft((current) => current - 1);
     }, 1000);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [choice, left]);
 
   const decide = (next: ApprovalChoice) => {
     if (choice) return;
-    setChoice(next);
-    onDecision?.(next, "operator");
+    setPicked(next);
+    onDecision?.(next);
   };
 
   const echo = choice ? t[ECHO_KEY[choice]] : null;
@@ -121,6 +136,11 @@ export default function ApprovalCard({
             <span className="inline-flex h-5.5 items-center rounded-chip bg-field px-1.5 font-mono text-[11.5px] text-ink-2 shadow-hairline">
               {toolName}
             </span>
+            {riskClass && (
+              <span className="inline-flex h-5.5 items-center rounded-chip bg-field px-1.5 font-mono text-[11.5px] text-red shadow-hairline">
+                {riskClass}
+              </span>
+            )}
             <span
               aria-label="审批倒计时"
               className={`ml-auto font-mono text-[12px] tabular-nums ${
@@ -130,6 +150,21 @@ export default function ApprovalCard({
               {formatClock(byTimeout ? 0 : left)}
             </span>
           </div>
+          {/* 分级依据 + 其余参数行 */}
+          {reason && (
+            <p className="mt-1.5 text-[12px] leading-relaxed text-ink-3">
+              依据:<span className="text-ink-2">{reason}</span>
+            </p>
+          )}
+          {metaLines.length > 0 && (
+            <p className="mt-1 font-mono text-[11.5px] leading-relaxed text-ink-3">
+              {metaLines.map((line) => (
+                <span key={line} className="block break-all">
+                  {line}
+                </span>
+              ))}
+            </p>
+          )}
           {/* 待执行脚本全文 */}
           <div className="mt-2.5">
             <CodeBlock

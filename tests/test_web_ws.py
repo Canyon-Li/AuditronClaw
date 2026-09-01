@@ -8,7 +8,7 @@ WS 层测试钉契约的四个面(定稿记录见 entry/web_ws 模块 docstring)
   补发与刷新后的画面重建共用同一数据面(事件缓存);补发段 seq 与
   实时段无缝接续
 - 上行帧:input 入队成 human 回合(origin 逐帧标记)并实时下发;
-  decision 契约已定、接线在 07(当前回 protocol_error 且连接存活);
+  decision 帧回填挂起审批、同回合续行(07 票,审批 stub 引擎);
   坏帧回 protocol_error 错误码不断连接
 - 多连接扇出:一端提交,所有在线连接同帧收到
 
@@ -25,8 +25,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from auditronclaw.core.approval.gate import TurnOrigin
+from auditronclaw.core.approval.gate import DecisionSource, TurnOrigin
 from auditronclaw.core.session import (
+    ApprovalRequest,
     Reply,
     ToolCall,
     ToolResult,
@@ -57,6 +58,37 @@ class StubEngine:
             tool_calls=[{"tool": "probe", "args": {"q": text}}],
             tool_results=[{"tool": "probe", "result": "ok"}],
             reply=f"echo:{text}"))
+
+
+class ApprovalStubEngine:
+    """假引擎复刻引擎审批契约:yield ApprovalRequest 后等应答通道,应答后续行同回合。
+
+    应答通道由属主桥注入(真实装配同形:engine 构造拿 bridge.responder,
+    测试侧在 owner_factory 里接线——引擎先于属主存在,桥要两边同一只)。
+    """
+
+    def __init__(self):
+        self.responder = None
+        self.decisions = []
+
+    # 复刻引擎契约的可配超时(worker 落审批帧时读它附进 payload);
+    # 非默认值证明 payload 传的是引擎真值,不是常量
+    approval_timeout = 123.0
+
+    async def run_turn(self, text, origin=TurnOrigin.UNATTENDED):
+        request = ApprovalRequest(tool="danger", args={"target": text},
+                                  risk_class="write", reason="写类副作用")
+        yield ToolCall(name="danger", args={"target": text})
+        yield request
+        decision = await self.responder(request)
+        self.decisions.append(decision)
+        result = "executed" if decision.approved else "rejected"
+        yield ToolResult(tool="danger", result=result)
+        yield Reply(content=f"done:{text}", final=True)
+        yield TurnEnd(trajectory=TurnTrajectory(
+            tool_calls=[{"tool": "danger", "args": {"target": text}}],
+            tool_results=[{"tool": "danger", "result": result}],
+            reply=f"done:{text}"))
 
 
 class WsTestBase(unittest.TestCase):
@@ -168,7 +200,7 @@ class TestWsUpstream(WsTestBase):
         self.assertEqual(frames[0]["seq"], 1, "空缓存首帧 seq 从 1 起")
 
     def test_decision_frame_unavailable_but_connection_survives(self):
-        """decision 帧契约已定、接线在 07:当前无挂起审批,回错误码不断连接。"""
+        """无挂起审批时的 decision 帧:回错误码不断连接。"""
         with self._client() as client:
             with client.websocket_connect(self._ws_url()) as ws:
                 ws.send_json({"type": "decision", "choice": "deny"})
@@ -200,6 +232,115 @@ class TestWsUpstream(WsTestBase):
                          "非 JSON/缺文本/空白文本/未知 type 各回各的错误码")
         self.assertEqual([f["type"] for f in frames], TURN_EVENT_TYPES,
                          "坏帧不断连接,合法帧照常受理")
+
+
+# ============ 上行帧:decision 回答挂起审批,同回合续行(07 票) ============
+
+class ApprovalWsTestBase(WsTestBase):
+    """审批 stub 引擎的通道形态:approval_request 帧下发 → decision 帧回填。"""
+
+    def setUp(self):
+        super().setUp()
+        self.engine = ApprovalStubEngine()
+
+    def _client(self, cache_size: int = 1000) -> TestClient:
+        engine, tasks_file = self.engine, self.tasks_file
+
+        async def owner_factory():
+            owner = BackendOwner(engine=engine, tasks_file=tasks_file,
+                                 check_interval=999, cache_size=cache_size)
+            engine.responder = owner.approval.responder
+            return owner
+
+        return TestClient(create_web_app(token=TOKEN, owner_factory=owner_factory))
+
+    def _drive_to_approval(self, client: TestClient, ws, text: str) -> dict:
+        """提交回合并读到审批帧(此时挂起已入桥,decision 帧必有物可答)。"""
+        ws.send_json({"type": "input", "text": text})
+        ws.receive_json()  # tool_call 帧先落,审批帧后到
+        return ws.receive_json()
+
+
+class TestWsDecisionFlow(ApprovalWsTestBase):
+
+    def test_decision_once_resumes_turn_in_place(self):
+        with self._client() as client:
+            with client.websocket_connect(self._ws_url()) as ws:
+                request = self._drive_to_approval(client, ws, "改一下")
+                ws.send_json({"type": "decision", "choice": "once"})
+                rest = [ws.receive_json() for _ in range(3)]
+
+        self.assertEqual(request["type"], "approval_request")
+        self.assertEqual(request["payload"]["tool"], "danger")
+        self.assertEqual(request["payload"]["risk_class"], "write")
+        self.assertEqual(request["payload"]["timeout_seconds"], 123.0,
+                         "倒计时限值随审批帧下发引擎真实超时,客户端不自设期限")
+        self.assertEqual([f["type"] for f in rest],
+                         ["tool_result", "reply", "turn_end"],
+                         "应答回填应答通道,同回合续行至收尾")
+        self.assertEqual(rest[0]["payload"]["result"], "executed")
+        decision = self.engine.decisions[0]
+        self.assertIs(decision.approved, True)
+        self.assertIs(decision.persist, False)
+        self.assertIs(decision.source, DecisionSource.USER_ONCE)
+
+    def test_decision_always_maps_to_persist(self):
+        with self._client() as client:
+            with client.websocket_connect(self._ws_url()) as ws:
+                self._drive_to_approval(client, ws, "再改")
+                ws.send_json({"type": "decision", "choice": "always"})
+                for _ in range(3):
+                    ws.receive_json()  # 收完续行帧,回合收尾
+
+        decision = self.engine.decisions[0]
+        self.assertIs(decision.approved, True)
+        self.assertIs(decision.persist, True)
+        self.assertIs(decision.source, DecisionSource.USER_PERSIST)
+
+    def test_decision_deny_maps_to_human_rejection(self):
+        with self._client() as client:
+            with client.websocket_connect(self._ws_url()) as ws:
+                self._drive_to_approval(client, ws, "别改")
+                ws.send_json({"type": "decision", "choice": "deny"})
+                rest = [ws.receive_json() for _ in range(3)]
+
+        self.assertEqual(rest[0]["payload"]["result"], "rejected",
+                         "拒绝作为 tool_result 返回,回合照常收尾")
+        decision = self.engine.decisions[0]
+        self.assertIs(decision.approved, False)
+        self.assertIs(decision.source, DecisionSource.USER_ONCE,
+                      "deny 是人的明确拒绝,不是无人值守")
+
+    def test_invalid_choice_gets_decision_invalid_and_connection_survives(self):
+        with self._client() as client:
+            with client.websocket_connect(self._ws_url()) as ws:
+                self._drive_to_approval(client, ws, "无效选项")
+                ws.send_json({"type": "decision", "choice": "yes"})
+                error = ws.receive_json()
+                # 无效帧不断连接:补一个合法应答,回合仍收尾
+                ws.send_json({"type": "decision", "choice": "deny"})
+                for _ in range(3):
+                    ws.receive_json()
+
+        self.assertEqual(error["type"], "protocol_error")
+        self.assertEqual(error["payload"]["code"], "decision_invalid",
+                         "choice 缺失/不认识按无效应答拒,不是悄悄默认")
+        self.assertEqual(self.engine.decisions[0].approved, False)
+
+    def test_stale_decision_after_resolution_is_unavailable(self):
+        """已终局的审批再收 decision:无物可答,回 decision_unavailable。"""
+        with self._client() as client:
+            with client.websocket_connect(self._ws_url()) as ws:
+                self._drive_to_approval(client, ws, "第一笔")
+                ws.send_json({"type": "decision", "choice": "once"})
+                for _ in range(3):
+                    ws.receive_json()  # 收完续行帧,回合收尾
+                ws.send_json({"type": "decision", "choice": "deny"})
+                error = ws.receive_json()
+
+        self.assertEqual(error["payload"]["code"], "decision_unavailable")
+        self.assertEqual(len(self.engine.decisions), 1,
+                         "迟到帧弃置,不得改写已终局的决定")
 
 
 # ============ 扇出:多连接同帧 ============

@@ -20,7 +20,10 @@ payload},Q16)存事件,浏览器特有物不进缓存。
   事件落缓存即向在线 WS 连接广播(subscribe/unsubscribe,见 entry.web_ws)
 
 审计落点由调用方先行 init_audit_logger(属主只订阅,不初始化)。
-审批应答通道(07 票接线前)不注入:人来源回合的必批调用按无人拒。
+审批动线(07 票):装配工厂造一只 WebApprovalBridge,同一只接两侧——
+engine 的 approval_responder 与属主的 answer_approval;decision 帧经
+entry.web_ws 落到属主桥。不答即拒由引擎超时兜底(TIMEOUT 留痕);审批帧
+payload 附引擎真实超时(timeout_seconds),卡面倒计时以此为限。
 """
 import asyncio
 import itertools
@@ -37,7 +40,7 @@ from auditronclaw.core.bus import TurnRequest
 from auditronclaw.core.config import WorkspaceConfig
 from auditronclaw.core.heartbeat import pacemaker_loop
 from auditronclaw.core.logger import get_audit_logger
-from auditronclaw.core.approval.gate import TurnOrigin
+from auditronclaw.core.approval.gate import ApprovalDecision, TurnOrigin
 from auditronclaw.core.session import (
     ApprovalRequest,
     Reply,
@@ -48,6 +51,7 @@ from auditronclaw.core.session import (
     TurnEvent,
     TurnTrajectory,
 )
+from entry.web_approval import WebApprovalBridge
 
 logger = logging.getLogger(__name__)
 
@@ -223,17 +227,30 @@ class BackendOwner:
                  check_interval: float = DEFAULT_CHECK_INTERVAL,
                  cache_size: int = DEFAULT_CACHE_SIZE,
                  audit_buffer: int = DEFAULT_AUDIT_BUFFER,
+                 approval: Optional[WebApprovalBridge] = None,
                  resources: Optional[AsyncExitStack] = None):
         self.engine = engine
         self.tasks_file = tasks_file
         self.check_interval = check_interval
         self.cache = EventCache(maxlen=cache_size)
         self.audit_tap = AuditTap(maxlen=audit_buffer)
+        # 审批桥:engine 构造时注入 responder 的那只必须与属主暴露的是同一只
+        # (真实装配经 approval 参数显式传入;直构缺省自建——此时引擎没有
+        # 应答通道,decision 帧永远无物可答,与未装配同形)
+        self.approval = approval or WebApprovalBridge()
         self.queue: "asyncio.Queue[TurnRequest | str]" = asyncio.Queue()
         self._resources = resources
         self._tasks: list[asyncio.Task] = []
         self._subscribers: "set[asyncio.Queue[CachedEvent]]" = set()
         self._unsubscribe_audit: Optional[Callable[[], None]] = None
+
+    def answer_approval(self, decision: ApprovalDecision) -> bool:
+        """WS decision 帧的落点:回填挂起审批,引擎同回合续行。
+
+        False = 无挂起或已终局(超时已拒/已应答)——由 WS 层回
+        decision_unavailable,答案弃置。
+        """
+        return self.approval.answer(decision)
 
     # ============ 实时广播:事件落缓存即扇出到在线 WS 连接 ============
 
@@ -331,6 +348,10 @@ class BackendOwner:
             try:
                 async for event in self.engine.run_turn(text, origin=origin):
                     type_, payload = serialize_turn_event(event)
+                    if type_ == "approval_request":
+                        # 审批帧附引擎真实超时(Q10:AUDITRONCLAW_APPROVAL_TIMEOUT
+                        # 构造期可配):不答即拒的期限在引擎,卡面倒计时以此为限
+                        payload["timeout_seconds"] = self.engine.approval_timeout
                     self._broadcast(self.cache.append(type_, origin.value, payload))
             except Exception as exc:
                 # CancelledError 不在此列:取消即属主停机,原样上抛交 stop 收口
@@ -350,7 +371,8 @@ def assemble_backend_owner(*, thread_id: str, provider_name: str,
 
     返回 async 工厂——引擎的 checkpointer(AsyncSqliteSaver)是异步资源,
     在 FastAPI lifespan 的运行环里构造;stop 经 AsyncExitStack 统一收口。
-    审批应答通道未注入(07 票接线),人来源回合必批调用现按无人拒。
+    审批桥同一只接两侧(07 票):engine 的应答通道与属主的 decision 帧
+    落点——人来源回合的必批调用经 WS 问人,不答即拒由引擎超时兜底。
     """
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
@@ -363,8 +385,10 @@ def assemble_backend_owner(*, thread_id: str, provider_name: str,
         app = create_agent_app(provider_name=provider_name,
                                model_name=model_name, workspace=workspace,
                                checkpointer=memory, thread_id=thread_id)
-        engine = SessionEngine(app, thread_id)
+        bridge = WebApprovalBridge()
+        engine = SessionEngine(app, thread_id, approval_responder=bridge.responder)
         return BackendOwner(engine=engine, tasks_file=workspace.tasks_file,
-                            check_interval=check_interval, resources=resources)
+                            check_interval=check_interval, approval=bridge,
+                            resources=resources)
 
     return _factory

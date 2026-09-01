@@ -5,7 +5,7 @@
  * last_seq 立即重连补缺口)。契约见 entry/web_ws.py 模块 docstring。 */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Envelope, UpstreamMessage } from "./protocol";
+import type { DecisionChoice, Envelope, UpstreamMessage } from "./protocol";
 
 export type ConnectionStatus = "connecting" | "open" | "reconnecting";
 
@@ -105,5 +105,16 @@ export function useTerminalStream(token: string) {
     return false;
   }, []);
 
-  return { status, envelopes, protocolError, sendInput };
+  const sendDecision = useCallback((choice: DecisionChoice): boolean => {
+    const socket = socketRef.current;
+    if (socket?.readyState === WebSocket.OPEN) {
+      const frame: UpstreamMessage = { type: "decision", choice };
+      socket.send(JSON.stringify(frame));
+      return true;
+    }
+    // 连接断开时审批仍在服务进程挂起:重连后补答即可,超时兜底不答即拒
+    return false;
+  }, []);
+
+  return { status, envelopes, protocolError, sendInput, sendDecision };
 }
