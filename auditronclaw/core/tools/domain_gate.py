@@ -25,7 +25,7 @@ _EXTENDED_DOMAINS: set = set()
 # 环境变量若非空，扩展审计在装配预热或首次 refresh 时补落，语义不丢。
 _LAST_ENV_RAW: str | None = None
 
-# 运行时审批规则缓存：审批门"永久允许"铸出的域名扩展规则作用域（域名
+# 运行时审批规则缓存：审批门"永久允许"写入的域名扩展规则作用域（域名
 # 模式，如 open.feishu.cn / *.feishu.cn），refresh 时即时读盘。
 # 名单三来源见 CONTEXT.md「域名白名单」：默认 ∪ 环境变量扩展 ∪ 运行时审批规则
 _APPROVAL_DOMAIN_PATTERNS: list = []
@@ -77,7 +77,7 @@ def load_approval_rule_domains() -> list:
     """
     读取运行时审批规则中域名扩展规则的作用域（域名模式）。
 
-    即时读盘、每次全读——铸规则/撤销/夹具预置当次生效，不重启，与审批
+    即时读盘、每次全读——入规则/撤销/夹具预置当次生效，不重启，与审批
     规则匹配（RuleStore 每次匹配读盘）同一机制。文件缺失/损坏=空模式集
     （fail-closed，守卫照常拒）；未装配落点同样=空模式集（少放行）。
 
@@ -97,7 +97,7 @@ def refresh_extended_domains() -> set:
     刷新扩展名单缓存：环境变量 + 运行时审批规则（名单三来源的后两个）。
 
     生产调用路径（05 票）：check_domain_allowed 名单未命中时即调——审批门
-    "永久允许"铸出的域名规则、规则撤销、环境变量调整，都在下一次判定
+    "永久允许"写入的域名规则、规则撤销、环境变量调整，都在下一次判定
     生效，不重启。环境变量部分 raw 变化才重解析（扩展审计随之只记一次）。
     """
     global _EXTENDED_DOMAINS, _APPROVAL_DOMAIN_PATTERNS, _LAST_ENV_RAW
@@ -114,7 +114,7 @@ def check_domain_allowed(domain: str) -> bool:
     白名单守卫（纯判定）：工具绑定的目标域是否在名单内。
 
     名单 = 默认名单 ∪ 环境变量扩展 ∪ 运行时审批规则（CONTEXT.md「域名
-    白名单」；审批门"永久允许"铸入的域名规则经 refresh 生产路径即时生效，
+    白名单」；审批门"永久允许"写入的域名规则经 refresh 生产路径即时生效，
     见 refresh_extended_domains）。默认与扩展缓存命中即返回；未命中时先
     refresh 感知变化（环境变量恰逢其时变化会留一次扩展审计，见 refresh），
     再按规则作用域模式判定。拒绝时的审计事件由调用方（工具层）落。

@@ -10,7 +10,7 @@
 - 夹具落点:规则文件随每用例临时 workspace(装配期注入,05 票)
 - 纯函数/夹具:生产同款规则集守恒(= 冷启动清单)、预置落盘形状、作用域边界
 - 假 LLM 驱动管线测试:无人档规则命中静默放行/未命中拒绝并继续;有人档
-  未匹配自动批准(决定留痕、不铸规则)
+  未匹配自动批准(决定留痕、不入规则)
 """
 import asyncio
 import json
@@ -143,7 +143,7 @@ class TestProductionRuleFixture(unittest.TestCase):
                          PRODUCTION_RULES)
 
     def test_preset_writes_bench_fixture_entries(self):
-        """预置落盘:三条 source=bench_fixture,字段形状与生产铸出一致"""
+        """预置落盘:三条 source=bench_fixture,字段形状与生产写入一致"""
         with tempfile.TemporaryDirectory() as tmp:
             workspace = WorkspaceConfig.from_root(tmp)
             bench_pipeline.preset_production_rules(workspace)
@@ -244,7 +244,7 @@ class TestGoldenFormAttended(unittest.TestCase):
 
     def test_unmatched_call_approved_once_and_executes(self):
         """office 根目录写(生产规则未覆盖)→ 打断问人 → 夹具应答器批准一次 →
-        执行成功;决定留痕 user_once;persist=False 不铸新规则(生产规则
+        执行成功;决定留痕 user_once;persist=False 不入新规则(生产规则
         形状不因基准漂移)。"""
         executed = []
 
@@ -280,7 +280,7 @@ class TestGoldenFormAttended(unittest.TestCase):
         self.assertEqual(raw["reply"], "已写好。")
         decisions = _decisions(spy)
         self.assertEqual([e["source"] for e in decisions], ["user_once"])
-        # 不铸规则:回合后规则文件仍是预置的生产同款三条
+        # 不入规则:回合后规则文件仍是预置的生产同款三条
         self.assertEqual({(e["action"], e["scope"]) for e in entries},
                          PRODUCTION_RULES)
 

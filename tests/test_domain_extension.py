@@ -1,12 +1,12 @@
 """域名扩展流程 05 票:白名单扩展副作用类的从无到有。
 
 词汇见 CONTEXT.md「域名白名单」:名单 = 默认名单 ∪ 环境变量扩展 ∪ 运行时
-审批规则——经审批门"永久允许"铸入、运行期生效。被拦的是"扩展尝试"
+审批规则——经审批门"永久允许"入规则、运行期生效。被拦的是"扩展尝试"
 (绑定域在名单外的工具调用,分级 domain_extend),不是运行时 URL——参数面
 无 URL 字段是既有原则。
 
 分层(沿用仓库测试纪律):
-- 真实组件:RuleStore 铸域名规则 → check_domain_allowed 即时放行(不重启);
+- 真实组件:RuleStore 写入域名规则 → check_domain_allowed 即时放行(不重启);
   通配域作用域;非域名规则不放行域名;撤销即失效;环境变量守卫
 - 引擎级闭环(v5 验收项):无人拦 → 审批"永久允许" → 规则落盘带域名 →
   同域名调用无人静默放行;rule_persisted 事件携带域名
@@ -60,10 +60,10 @@ class DomainRuleTestBase(unittest.TestCase):
             json.dump(entries, f, ensure_ascii=False)
 
 
-# ============ 运行期生效:铸规则 → 守卫即时放行(经 refresh 生产路径) ============
+# ============ 运行期生效:入规则 → 守卫即时放行(经 refresh 生产路径) ============
 
 class TestApprovalRuleDomainsRuntime(DomainRuleTestBase):
-    """审批规则成为名单第三来源:铸入/撤销/预置当次生效,不重启。"""
+    """审批规则成为名单第三来源:写入/撤销/预置当次生效,不重启。"""
 
     def test_before_rule_domain_denied(self):
         """基线:绑定域被移出默认名单且无规则 → 名单外拒绝(冷启动形态)"""
@@ -72,7 +72,7 @@ class TestApprovalRuleDomainsRuntime(DomainRuleTestBase):
         self.assertTrue(check_domain_allowed("imap.qq.com"))
 
     def test_persisted_domain_rule_allows_without_restart(self):
-        """铸规则即生效:同进程 persist 后同域名放行,无需重启或手动刷新"""
+        """入规则即生效:同进程 persist 后同域名放行,无需重启或手动刷新"""
         self.assertFalse(check_domain_allowed(FEISHU_DOMAIN))
         rule = RuleStore(path=self.rules_path).persist_rule(
             RISK_DOMAIN_EXTEND, FEISHU_DOMAIN, "approval", thread_id="domain_test")
@@ -158,7 +158,7 @@ def _push_call(call_id: str, text: str) -> AIMessage:
 
 
 class TestDomainExtensionClosedLoop(DomainRuleTestBase):
-    """真工具三回合:无人拦 → 永久允许铸规则落盘 → 同域名无人静默放行。"""
+    """真工具三回合:无人拦 → 永久允许入规则落盘 → 同域名无人静默放行。"""
 
     def test_unattended_rejected_then_persist_then_silent_pass(self):
         fake = FakeSender()
@@ -226,8 +226,8 @@ class TestDomainExtensionClosedLoop(DomainRuleTestBase):
         self.assertEqual(requests[0].risk_class, RISK_DOMAIN_EXTEND)
         self.assertEqual(requests[0].args, {"summary_text": "第2回合日报"})
         self.assertIn(FEISHU_DOMAIN, requests[0].reason)
-        # 永久允许:先铸规则后执行——本次推送即真实发出(内层域名门同走新规则)
-        self.assertEqual(sent_after_attended, 1, "批准且已铸规则的推送必须真实发出")
+        # 永久允许:先入规则后执行——本次推送即真实发出(内层域名门同走新规则)
+        self.assertEqual(sent_after_attended, 1, "批准且已入规则的推送必须真实发出")
 
         # 回合三(心跳):域名经规则入名单 → 分级免批 → 无人静默放行
         self.assertNotIn(ApprovalRequest, [type(e) for e in silent])

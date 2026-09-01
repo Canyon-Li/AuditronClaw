@@ -162,9 +162,9 @@ def create_agent_app(
 
     # 审批门:所有注册工具(内置/技能/外接)的调用必经"分级 → 规则 → 问人"
     # 固定链。规则是高危的唯一豁免通道:规则文件在 workspace 级、office 外
-    # (agent 写面够不着自己的规则),每次匹配即时读盘,铸规则/撤销当次生效。
+    # (agent 写面够不着自己的规则),每次匹配即时读盘,入规则/撤销当次生效。
     # 人来源回合规则未命中时 interrupt 问人(03 票),答"永久允许"即经
-    # rule_store 铸规则;心跳/基准/未声明来源构造上不问人,直接拒。
+    # rule_store 入规则;心跳/基准/未声明来源构造上不问人,直接拒。
     rule_store = RuleStore(path=workspace.approval_rules_file)
     # 域名门读同一份规则文件(第三名单源与审批豁免通道同源,装配点单次接线)
     init_domain_gate(workspace.approval_rules_file)

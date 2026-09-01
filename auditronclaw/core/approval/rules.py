@@ -1,18 +1,18 @@
 """审批规则(02 票):高危的唯一豁免通道。
 
-词汇见 CONTEXT.md「审批规则」:一次"永久允许"铸出的持久化授权,绑定动作
+词汇见 CONTEXT.md「审批规则」:一次"永久允许"入规则的持久化授权,绑定动作
 与目标作用域,条目带出处。规则之外的高危在无人时一律拒、拒绝并继续。
 
 - 落点:workspace 级 approval_rules.json,在 office 之外——agent 的写面被
   路径校验挡在 office 内,够不着自己的规则
 - 匹配纯函数:动作(=副作用分级级别)相等且调用全部目标作用域被规则覆盖
   才算命中;提不出目标作用域的调用(未入册/外接)规则不豁免,不猜
-- 即时性:每次匹配读盘——铸规则与撤销当次生效,不重启(05 票域名扩展的
+- 即时性:每次匹配读盘——入规则与撤销当次生效,不重启(05 票域名扩展的
   运行期生效同走此机制)
 - 冷启动:规则文件不存在=空规则集,门照常工作(拒绝并继续),不报错不跳过;
   文件损坏或含非法条目按 fail-closed 处理(空集/跳过该条)
 
-铸规则的主轨是审批交互"永久允许"(03/04 票接线),本票落内部接口
+入规则的主轨是审批交互"永久允许"(03/04 票接线),本票落内部接口
 persist_rule;清单与撤销是管理面(04 票 TUI 复用)。
 """
 import fnmatch
@@ -34,22 +34,22 @@ from .classifier import (
 )
 from .gate import log_rule_persisted, log_rule_revoked
 
-# 可铸规则的动作集:必批级。read 无从豁免;unclassified 提不出目标作用域,
-# 规则世界不收(不是拒绝铸出,是从机制上无法命中)
+# 可入规则的动作集:必批级。read 无从豁免;unclassified 提不出目标作用域,
+# 规则世界不收(不是拒绝写入,是从机制上无法命中)
 APPROVAL_ACTIONS = frozenset({RISK_WRITE, RISK_DELETE, RISK_EXECUTE, RISK_DOMAIN_EXTEND})
 
 
 class RuleSource(str, Enum):
     """规则出处:每条豁免可枚举其正当性(审计叙事的主体)。"""
 
-    APPROVAL = "approval"            # 审批交互"永久允许"铸出(主轨,03/04 接线)
+    APPROVAL = "approval"            # 审批交互"永久允许"入规则(主轨,03/04 接线)
     CLI = "cli"                      # 命令行管理面(预留)
     BENCH_FIXTURE = "bench_fixture"  # 基准夹具预置(06 票)
 
 
 @dataclass(frozen=True)
 class ApprovalRule:
-    """条目 schema:id / 动作 / 目标作用域 / 出处 / 铸成时间。
+    """条目 schema:id / 动作 / 目标作用域 / 出处 / 创建时间。
 
     动作取值=副作用分级级别(write/delete/execute/domain_extend);
     作用域是 workspace 相对路径模式(office/scripts/**、tasks.json、
@@ -148,14 +148,14 @@ def _check_scope(scope) -> str:
 
 
 def _utc_now_iso() -> str:
-    """铸成时间:与审计日志同一时间戳格式(UTC,Z 后缀)。"""
+    """创建时间:与审计日志同一时间戳格式(UTC,Z 后缀)。"""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class RuleStore:
     """规则文件的门面:读即时读盘,写原子落盘。
 
-    每次匹配重新读文件而非构造时缓存——铸规则与撤销都要运行期即时生效
+    每次匹配重新读文件而非构造时缓存——入规则与撤销都要运行期即时生效
     (单操作员低频调用,文件极小,读取代价可忽略)。
     """
 
@@ -187,7 +187,7 @@ class RuleStore:
         return rules
 
     def list_rules(self) -> List[ApprovalRule]:
-        """规则清单(管理面:清单可查,落盘序=铸成序)。"""
+        """规则清单(管理面:清单可查,落盘序=创建序)。"""
         return self._load()
 
     def match(self, assessment: RiskAssessment) -> Optional[ApprovalRule]:
@@ -201,14 +201,14 @@ class RuleStore:
 
     def persist_rule(self, action: str, scope: str, source: str,
                      thread_id: str = "system") -> ApprovalRule:
-        """铸规则("永久允许"的落点):条目落盘 + rule_persisted 入审计。
+        """入规则("永久允许"的落点):条目落盘 + rule_persisted 入审计。
 
-        幂等:同动作同作用域已存在时返回既有条目,不重复铸、不重复留痕。
+        幂等:同动作同作用域已存在时返回既有条目,不重复写、不重复留痕。
         03/04 票的 ApprovalDecision(persist=true) 接线到本接口。
         """
         if action not in APPROVAL_ACTIONS:
             raise ValueError(
-                f"动作 {action!r} 不可铸规则(可铸:{sorted(APPROVAL_ACTIONS)})")
+                f"动作 {action!r} 不可入规则(可入规则的动作:{sorted(APPROVAL_ACTIONS)})")
         scope = _check_scope(scope)
         source = RuleSource(source).value  # 非法出处直接 ValueError
 

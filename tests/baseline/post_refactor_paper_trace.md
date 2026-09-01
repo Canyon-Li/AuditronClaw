@@ -13,7 +13,7 @@
 
 ## 条件分级的名单入口如实分档
 
-classifier 字面量之外，绑定域名进白名单有三条路：默认名单（domain_gate.py，feishu/mail 现状，再 +1 基座编辑，域模块 import 期 assert 把关）；部署侧环境变量 AUDITRONCLAW_ALLOWED_DOMAINS（0）；运行期审批规则铸入（0，"永久允许"当轮生效）。即条件分级工具基座编辑 1（默认名单路线为 2），路线随域交付 PR 评审定并如实计入。
+classifier 字面量之外，绑定域名进白名单有三条路：默认名单（domain_gate.py，feishu/mail 现状，再 +1 基座编辑，域模块 import 期 assert 把关）；部署侧环境变量 AUDITRONCLAW_ALLOWED_DOMAINS（0）；运行期审批规则写入（0，"永久允许"当轮生效）。即条件分级工具基座编辑 1（默认名单路线为 2），路线随域交付 PR 评审定并如实计入。
 
 ## 收口新增的机器把守
 

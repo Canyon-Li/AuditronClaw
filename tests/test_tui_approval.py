@@ -10,7 +10,7 @@
   挂起审批按无人拒收尾(单 worker 队列不挂死)
 - 读答案循环:无效输入重问;Ctrl+C/Ctrl+D 一律拒(fail-closed)
 - 端到端(假 LLM 经 TUI 桥):心跳来源永不问人(无交互直接拒);批准一次/
-  永久允许/拒绝三答法;永久允许铸规则且此后同调用静默;退出收尾不堵回合
+  永久允许/拒绝三答法;永久允许入规则且此后同调用静默;退出收尾不堵回合
 
 先例:tests/test_tui_adapter.py(事件映射钉法)、tests/test_approval_interrupt.py(假件)。
 """
@@ -390,7 +390,7 @@ class TestPromptApprovalDecision(unittest.TestCase):
 # ============ 规则管理面:/rules 与 /revoke ============
 
 def _store(*entries):
-    """临时位规则存取,预铸条目 [(action, scope, source)](铸规则留痕 patch 掉)。"""
+    """临时位规则存取,预写条目 [(action, scope, source)](规则写入留痕 patch 掉)。"""
     store = RuleStore(path=os.path.join(tempfile.mkdtemp(prefix="tui04_store_"),
                                         "approval_rules.json"))
     with patch('auditronclaw.core.logger._audit_logger'):
@@ -419,7 +419,7 @@ class TestOperatorCommands(unittest.TestCase):
         self.assertIn("approval", _flat(calls))
         self.assertIn("cli", _flat(calls))
         self.assertIn("execute", _flat(calls))
-        self.assertRegex(_flat(calls), r"\d{4}-\d{2}-\d{2}", "铸成时间可见")
+        self.assertRegex(_flat(calls), r"\d{4}-\d{2}-\d{2}", "创建时间可见")
 
     def test_rules_empty_store_shows_cold_start_note(self):
         consumed, calls = self._run_command("/rules", _store())
@@ -589,7 +589,7 @@ async def _run_turn_answered(engine, bridge, read, text="写一份日报"):
 
 
 class TestTuiBridgeEndToEnd(unittest.TestCase):
-    """TUI 桥注入引擎后的三答法:批准执行、永久允许铸规则、拒绝返回 agent。"""
+    """TUI 桥注入引擎后的三答法:批准执行、永久允许入规则、拒绝返回 agent。"""
 
     def test_approve_once_executes_the_call(self):
         calls = []
@@ -648,7 +648,7 @@ class TestTuiBridgeEndToEnd(unittest.TestCase):
         self.assertEqual(entries[0]["source"], "approval")
         self.assertTrue(any(isinstance(e, ApprovalRequest) for e in first))
         self.assertFalse(any(isinstance(e, ApprovalRequest) for e in second),
-                         "规则已铸,同调用不再问人")
+                         "规则已写入,同调用不再问人")
 
     def test_deny_returns_rejection_to_agent(self):
         calls = []
