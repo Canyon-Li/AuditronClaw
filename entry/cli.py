@@ -192,6 +192,26 @@ def run_agent(thread: str = typer.Option("local_geek_master", "--thread", help="
     import entry.main as auditronclaw_main
     auditronclaw_main.main(thread_id=thread)
 
+@app.command("web")
+def run_web(
+    port: int = typer.Option(8642, "--port", help="Web 终端监听端口,仅绑定 127.0.0.1。"),
+):
+    """启动 Web 终端(脚手架形态):静态首屏 + token 鉴权,引擎随后续接入。"""
+    import uvicorn
+
+    from entry.web import create_web_app, generate_token
+
+    token = generate_token()
+    console.print(Panel(
+        "👾 [bold #8d52ff]AuditronClaw Web 终端[/bold #8d52ff] 已启动(仅本机访问)\n\n"
+        "[dim]token 每次启动随机生成,无 token 或错 token 的请求一律 403。[/dim]",
+        title="[bold white]✦  Web Terminal[/bold white]",
+        border_style="#8d52ff"
+    ))
+    # URL 单独成行打印:面板内 80 列会折行,拼不出完整可点链接
+    console.print(f"👉 [bold #00ffff]http://127.0.0.1:{port}/?token={token}[/bold #00ffff]\n")
+    uvicorn.run(create_web_app(token=token), host="127.0.0.1", port=port)
+
 @app.command("monitor")
 def run_monitor(thread: str = typer.Option("local_geek_master", "--thread", help="要监听的会话标识,对应 <thread>.jsonl 日志。")):
     try:

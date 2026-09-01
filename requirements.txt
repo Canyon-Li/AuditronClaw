@@ -27,5 +27,9 @@ langgraph-checkpoint-sqlite>=3.0.0
 # 工具支持
 pydantic>=2.0.0
 
+# Web 终端(FastAPI 后端:静态托管与 token 鉴权)
+fastapi>=0.141.0
+uvicorn>=0.52.0
+
 # 基准与测试(注入基准 YAML 用例)
 pyyaml>=6.0.0
