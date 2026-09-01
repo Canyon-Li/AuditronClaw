@@ -31,6 +31,10 @@ workspace/office
 
 *.egg-info/
 
+# Web 终端的 web 前端模块:依赖与构建产物不入库(部署者本地构建)
+node_modules/
+web/dist/
+
 .codojo/
 .claude/
 docs/local
