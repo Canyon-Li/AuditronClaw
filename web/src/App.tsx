@@ -1,5 +1,5 @@
-// 首屏:带 token 进入演练页(03 票,mock 回合事件流);无 token 给出提示。
-import RehearsalPage from './RehearsalPage'
+// 首屏:带 token 进入终端页(WS 真流);无 token 给出提示。
+import TerminalPage from './TerminalPage'
 
 function readToken(): string | null {
   const token = new URLSearchParams(window.location.search).get('token')
@@ -8,7 +8,7 @@ function readToken(): string | null {
 
 export default function App() {
   const token = readToken()
-  if (token) return <RehearsalPage />
+  if (token) return <TerminalPage token={token} />
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-105 flex-col items-center justify-center gap-2 px-4">
       <h1 className="text-[15px] font-medium text-ink">AuditronClaw Web 终端</h1>
