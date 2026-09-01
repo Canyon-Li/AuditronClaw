@@ -170,24 +170,26 @@ def _show_boot_error():
     ))
 
 
-@app.command("run")
-def run_agent(thread: str = typer.Option("local_geek_master", "--thread", help="会话标识,独立的历史/日志/画像。默认 local_geek_master 兼容现有数据。")):
-    load_dotenv(ENV_PATH)
+def _boot_env_ready() -> bool:
+    """启动自检(load_dotenv 后调用):提供商/型号齐备,按提供商核 API Key。"""
     provider = os.getenv("DEFAULT_PROVIDER")
     model = os.getenv("DEFAULT_MODEL")
     if not provider or not model:
-        _show_boot_error()
-        raise typer.Exit()
+        return False
     if provider != "ollama":
         if provider in ["openai", "aliyun", "z.ai", "tencent", "other"]:
-            if not os.getenv("OPENAI_API_KEY"):
-                _show_boot_error()
-                raise typer.Exit()
+            return bool(os.getenv("OPENAI_API_KEY"))
+        if provider == "anthropic":
+            return bool(os.getenv("ANTHROPIC_API_KEY"))
+    return True
 
-        elif provider == "anthropic":
-            if not os.getenv("ANTHROPIC_API_KEY"):
-                _show_boot_error()
-                raise typer.Exit()
+
+@app.command("run")
+def run_agent(thread: str = typer.Option("local_geek_master", "--thread", help="会话标识,独立的历史/日志/画像。默认 local_geek_master 兼容现有数据。")):
+    load_dotenv(ENV_PATH)
+    if not _boot_env_ready():
+        _show_boot_error()
+        raise typer.Exit()
 
     import entry.main as auditronclaw_main
     auditronclaw_main.main(thread_id=thread)
@@ -195,22 +197,42 @@ def run_agent(thread: str = typer.Option("local_geek_master", "--thread", help="
 @app.command("web")
 def run_web(
     port: int = typer.Option(8642, "--port", help="Web 终端监听端口,仅绑定 127.0.0.1。"),
+    thread: str = typer.Option("local_geek_master", "--thread", help="会话标识,引擎按它隔离历史/日志/画像。"),
 ):
-    """启动 Web 终端(脚手架形态):静态首屏 + token 鉴权,引擎随后续接入。"""
+    """启动 Web 终端:本进程成为唯一属主(引擎/队列/心跳进程内运行)。"""
     import uvicorn
 
+    from auditronclaw.core.config import WorkspaceConfig
+    from auditronclaw.core.logger import init_audit_logger
     from entry.web import create_web_app, generate_token
+    from entry.web_owner import assemble_backend_owner
+
+    load_dotenv(ENV_PATH)
+    if not _boot_env_ready():
+        _show_boot_error()
+        raise typer.Exit()
+    provider = os.getenv("DEFAULT_PROVIDER")
+    model = os.getenv("DEFAULT_MODEL")
+
+    cfg = WorkspaceConfig.from_env()
+    cfg.ensure_dirs()
+    init_audit_logger(cfg.log_dir)
 
     token = generate_token()
     console.print(Panel(
         "👾 [bold #8d52ff]AuditronClaw Web 终端[/bold #8d52ff] 已启动(仅本机访问)\n\n"
+        f"会话 [bold #00ffff]{thread}[/bold #00ffff] 由本进程唯一属主驱动——引擎、队列与心跳随服务启动运行。\n"
+        "[bold red]⚠ 双属主禁令:TUI 与本服务不可同时驱动同一会话。[/bold red]\n\n"
         "[dim]token 每次启动随机生成,无 token 或错 token 的请求一律 403。[/dim]",
         title="[bold white]✦  Web Terminal[/bold white]",
         border_style="#8d52ff"
     ))
     # URL 单独成行打印:面板内 80 列会折行,拼不出完整可点链接
     console.print(f"👉 [bold #00ffff]http://127.0.0.1:{port}/?token={token}[/bold #00ffff]\n")
-    uvicorn.run(create_web_app(token=token), host="127.0.0.1", port=port)
+    owner_factory = assemble_backend_owner(
+        thread_id=thread, provider_name=provider, model_name=model, workspace=cfg)
+    uvicorn.run(create_web_app(token=token, owner_factory=owner_factory),
+                host="127.0.0.1", port=port)
 
 @app.command("monitor")
 def run_monitor(thread: str = typer.Option("local_geek_master", "--thread", help="要监听的会话标识,对应 <thread>.jsonl 日志。")):

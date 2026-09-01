@@ -1,19 +1,27 @@
-"""审计日志:内存队列 + 守护线程写 JSONL。
+"""审计日志:内存队列 + 守护线程写 JSONL;只读订阅者旁路(Web 终端 04 票)。
 
 装配期工厂(05 票):入口 init_audit_logger(log_dir) 构造一次、显式注入
 落点;消费方 get_audit_logger() 取用,未初始化即拒绝——无审计不运行。
 单例性由模块持有(_audit_logger),类本身是普通构造器:log_dir 必填,
 构造即启动自检,审计位置不随启动目录漂移、不在 import 期冻结。
+
+订阅旁路:add_subscriber 挂纯增量回调,log_event 落队列后以拷贝递送——
+JSONL 文件保持纯档案职责,旁路丢事件时文件是后备(Q14)。
 """
 import os
 import json
+import logging
 import threading
 import queue
 import atexit
 from datetime import datetime, timezone
+from typing import Callable, List
 
 FALLBACK_FILE = "audit_fallback.jsonl"
 _PROBE_FILE = ".startup_probe"
+
+# 订阅者故障的告警通道:标准 logging,不回写审计(防自激)
+_module_logger = logging.getLogger(__name__)
 
 # 进程级实例与初始化锁:init 幂等、get 快路径无锁读
 _audit_logger: "JSONLEventLogger | None" = None
@@ -30,6 +38,11 @@ class JSONLEventLogger:
 
         # 无界内存队列，用于缓冲日志事件
         self.log_queue: "queue.Queue[dict]" = queue.Queue()
+
+        # 只读订阅者(Web 终端 04 票):旁路观察 log_event 的纯增量回调,
+        # 写路径不因订阅者的存在与否改变行为
+        self._subscribers: List[Callable[[dict], None]] = []
+        self._subscriber_lock = threading.Lock()
 
         self.worker_thread = threading.Thread(target=self._write_loop, daemon=True)
         self.worker_thread.start()
@@ -115,6 +128,39 @@ class JSONLEventLogger:
         }
 
         self.log_queue.put(log_item)
+        self._notify_subscribers(log_item)
+
+    def add_subscriber(self, callback: Callable[[dict], None]) -> Callable[[], None]:
+        """挂只读订阅者:每次 log_event 后收到条目拷贝(纯增量,无历史回放)。
+
+        返回卸除函数。订阅者拿的是浅拷贝——改写只影响自己的那份,落盘
+        条目不受影响;回调抛异常只被告警,不影响写路径。
+        """
+        with self._subscriber_lock:
+            self._subscribers.append(callback)
+
+        def _unsubscribe() -> None:
+            with self._subscriber_lock:
+                try:
+                    self._subscribers.remove(callback)
+                except ValueError:
+                    pass  # 重复卸除幂等
+
+        return _unsubscribe
+
+    def _notify_subscribers(self, log_item: dict) -> None:
+        """写路径已落队列后递送旁路:拷贝递送、逐个隔离故障。"""
+        with self._subscriber_lock:
+            subscribers = list(self._subscribers)
+        if not subscribers:
+            return
+        snapshot = dict(log_item)
+        for callback in subscribers:
+            try:
+                callback(snapshot)
+            except Exception:
+                _module_logger.warning("审计订阅者回调失败,已忽略(写路径不受影响)",
+                                       exc_info=True)
 
     def shutdown(self):
         self.log_queue.put(None)

@@ -1,7 +1,8 @@
-"""Web 终端后端:token 鉴权中间件 + web/dist 静态托管。
+"""Web 终端后端:token 鉴权中间件 + web/dist 静态托管 + 属主 REST 端点。
 
-脚手架形态:占位首屏的静态链路与无凭据拦截;引擎装配、WS 契约、
-并存横幅随后续接入。威胁模型是 localhost 绑定 + token——堵恶意网页
+本进程即唯一属主(引擎/队列/心跳在 lifespan 内装配,见 entry/web_owner);
+浏览器是它的客户端。REST 承载静态资源、启动快照与审计流查询(Q16);
+WS 契约随后续票接入。威胁模型是 localhost 绑定 + token——堵恶意网页
 对 127.0.0.1 的 CSRF/DNS rebinding 替点审批;token 由启动入口随机
 生成并打印,REST 与 WS 握手走同一中间件校验。
 """
@@ -10,12 +11,18 @@ from __future__ import annotations
 
 import logging
 import secrets
+from dataclasses import asdict
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 from urllib.parse import parse_qsl
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.staticfiles import StaticFiles
+
+if TYPE_CHECKING:
+    from entry.web_owner import BackendOwner
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +33,7 @@ DEFAULT_STATIC_DIR = Path(__file__).resolve().parents[1] / "web" / "dist"
 COOKIE_NAME = "auditronclaw_token"
 
 _DIST_NOT_BUILT_HINT = "web/dist 未构建:先在 web/ 下执行 npm run build"
+_NO_OWNER_HINT = "属主未装配(脚手架形态):引擎/队列/心跳未运行,无数据可查"
 
 
 def generate_token() -> str:
@@ -96,22 +104,43 @@ class TokenAuthMiddleware:
         return None, False
 
 
-def create_web_app(token: str, static_dir: Path | str | None = None) -> FastAPI:
-    """Web 终端 app 工厂:token 鉴权中间件 + web/dist 静态托管。
+def create_web_app(token: str, static_dir: Path | str | None = None,
+                   owner_factory: Optional[Callable[[], Awaitable["BackendOwner"]]]
+                   = None) -> FastAPI:
+    """Web 终端 app 工厂:token 鉴权中间件 + 属主端点 + web/dist 静态托管。
 
+    owner_factory 注入即在 lifespan 内装配唯一属主(引擎/队列/心跳,
+    见 entry.web_owner);不注入为脚手架形态,属主端点明确 503。
     static_dir 注入供测试,缺省锚仓库 web/dist。dist 未构建时不炸启动
     (带 token 访问得 503 提示先构建)——后端行为不依赖 Node 存在。
     """
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        owner: BackendOwner | None = None
+        if owner_factory is not None:
+            owner = await owner_factory()
+            await owner.start()
+            app.state.owner = owner
+        try:
+            yield
+        finally:
+            if owner is not None:
+                await owner.stop()
+
     app = FastAPI(
         title="AuditronClaw Web 终端",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        lifespan=lifespan,
     )
     app.add_middleware(TokenAuthMiddleware, token=token)
+    _register_owner_routes(app)
 
     directory = Path(static_dir) if static_dir is not None else DEFAULT_STATIC_DIR
     if directory.is_dir():
+        # API 路由先于 "/" 挂载注册,静态兜底不影响 /api/* 命中
         app.mount("/", StaticFiles(directory=directory, html=True), name="web")
         return app
 
@@ -122,3 +151,26 @@ def create_web_app(token: str, static_dir: Path | str | None = None) -> FastAPI:
         return JSONResponse({"detail": _DIST_NOT_BUILT_HINT}, status_code=503)
 
     return app
+
+
+def _register_owner_routes(app: FastAPI) -> None:
+    """属主数据端点:快照(事件缓存)与审计查询(旁路缓冲)。"""
+
+    @app.get("/api/snapshot")
+    async def api_snapshot(request: Request, since: int = 0):
+        owner: BackendOwner | None = getattr(request.app.state, "owner", None)
+        if owner is None:
+            return JSONResponse({"detail": _NO_OWNER_HINT}, status_code=503)
+        events = [asdict(e) for e in owner.cache.snapshot(since)]
+        return {"events": events, "latest_seq": owner.cache.latest_seq}
+
+    @app.get("/api/audit")
+    async def api_audit(request: Request, limit: int = 50,
+                        thread_id: Optional[str] = None,
+                        event: Optional[str] = None, since: int = 0):
+        owner: BackendOwner | None = getattr(request.app.state, "owner", None)
+        if owner is None:
+            return JSONResponse({"detail": _NO_OWNER_HINT}, status_code=503)
+        entries = owner.audit_tap.query(limit=limit, thread_id=thread_id,
+                                        event=event, since=since)
+        return {"entries": entries, "count": len(entries)}
