@@ -2,7 +2,7 @@
 
 分层(沿用仓库测试纪律):
 - 纯函数单测:scope_matches / rule_matches / 分级器目标提取(targets)
-- 真实组件行为测试:RuleStore 落盘(冷启动/铸规则/撤销)、门接真实 matcher、
+- 真实组件行为测试:RuleStore 落盘(冷启动/入规则/撤销)、门接真实 matcher、
   装配点接线、规则文件对 agent 写面不可达
 
 词汇见 CONTEXT.md「审批规则/副作用分级/审批门」。
@@ -117,7 +117,7 @@ class TestRuleMatchFunction(unittest.TestCase):
         self.assertFalse(rule_matches(rule, _assess(RISK_WRITE, [])))
 
     def test_read_class_never_matches(self):
-        """免批级不进规则世界(可铸动作集就不含 read)"""
+        """免批级不进规则世界(可入规则的动作集就不含 read)"""
         self.assertNotIn("read", APPROVAL_ACTIONS)
         rule = self._rule(RISK_WRITE, "tasks.json")
         self.assertFalse(rule_matches(rule, _assess("read", ["tasks.json"])))
@@ -216,7 +216,7 @@ class TestClassifierTargets(unittest.TestCase):
         self.assertEqual(assess.targets, ("open.feishu.cn",))
 
 
-# ============ RuleStore:冷启动 / 铸规则 / 撤销(真实组件) ============
+# ============ RuleStore:冷启动 / 入规则 / 撤销(真实组件) ============
 
 from unittest.mock import patch
 
@@ -269,7 +269,7 @@ class TestRuleStoreColdStart(RulesTestBase):
         self.assertIsNone(store.match(_assess(RISK_WRITE, ["tasks.json"])))
 
     def test_invalid_entries_skipped_valid_kept(self):
-        """非法条目跳过(缺字段/动作不可铸/出处未知),合法条目保留"""
+        """非法条目跳过(缺字段/动作不可入规则/出处未知),合法条目保留"""
         with open(self.rules_path, "w", encoding="utf-8") as f:
             json.dump([
                 {"id": "ok1", "action": "write", "scope": "tasks.json",
@@ -287,7 +287,7 @@ class TestRuleStoreColdStart(RulesTestBase):
 
 
 class TestRuleStorePersist(RulesTestBase):
-    """铸规则:条目落盘 + rule_persisted 入审计("永久允许"的内部接口)。"""
+    """入规则:条目落盘 + rule_persisted 入审计("永久允许"的内部接口)。"""
 
     def test_persist_creates_entry_and_file(self):
         """条目五字段齐全;文件是 JSON 数组,重开 store 可读回"""
@@ -307,7 +307,7 @@ class TestRuleStorePersist(RulesTestBase):
         self.assertEqual(self._store().list_rules(), [rule])
 
     def test_persist_emits_rule_persisted_audit(self):
-        """铸规则即留痕:rule_persisted 事件携带条目整体"""
+        """入规则即留痕:rule_persisted 事件携带条目整体"""
         rule = self._store().persist_rule(
             RISK_WRITE, "tasks.json", RuleSource.APPROVAL.value,
             thread_id="persist_test")
@@ -319,7 +319,7 @@ class TestRuleStorePersist(RulesTestBase):
         })
 
     def test_persist_is_idempotent_per_action_scope(self):
-        """同动作同作用域不重复铸:返回既有条目,文件单条、事件只一次"""
+        """同动作同作用域不重复写:返回既有条目,文件单条、事件只一次"""
         store = self._store()
         first = store.persist_rule(RISK_WRITE, "tasks.json", "approval")
         second = store.persist_rule(RISK_WRITE, "tasks.json", "approval")
@@ -330,7 +330,7 @@ class TestRuleStorePersist(RulesTestBase):
              if c.kwargs.get("event") == EVENT_RULE_PERSISTED].__len__(), 1)
 
     def test_persist_validates_action_scope_source(self):
-        """非法输入直接拒:不可铸动作、空/带空白作用域、未知出处"""
+        """非法输入直接拒:不可入规则动作、空/带空白作用域、未知出处"""
         store = self._store()
         with self.assertRaises(ValueError):
             store.persist_rule("read", "tasks.json", "approval")
@@ -340,7 +340,7 @@ class TestRuleStorePersist(RulesTestBase):
             store.persist_rule(RISK_WRITE, " tasks.json", "approval")
         with self.assertRaises(ValueError):
             store.persist_rule(RISK_WRITE, "tasks.json", "whoever")
-        self.assertEqual(store.list_rules(), [], "非法铸规则不得落任何条目")
+        self.assertEqual(store.list_rules(), [], "非法入规则不得落任何条目")
         self.assertFalse(os.path.exists(self.rules_path))
 
 

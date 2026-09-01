@@ -1,7 +1,7 @@
 """工作区装配链集成测试(05 票票面验收项)。
 
 一份临时 WorkspaceConfig 从入口形态出发,驱动全部落点消费者:
-规则铸进 cfg.approval_rules_file、任务落 cfg.tasks_file、办公工具写
+规则写入 cfg.approval_rules_file、任务落 cfg.tasks_file、办公工具写
 cfg.office_dir、技能加载器扫 cfg.skills_dir、审计事件经 get_audit_logger
 流出——全链没有一处读模块级路径常量(守卫见
 tests/test_config_and_skill_loader.py)。
@@ -37,7 +37,7 @@ class TestWorkspaceDrivesAllConsumers(WorkspaceWiringTestBase):
     """cfg 一份到底:规则/任务/工位/技能/审计全部落在 cfg 派生路径。"""
 
     def test_rules_persist_lands_in_cfg(self):
-        """审批规则铸进 cfg.approval_rules_file,且在 office 之外(agent 写面够不着)"""
+        """审批规则写入 cfg.approval_rules_file,且在 office 之外(agent 写面够不着)"""
         from auditronclaw.core.approval.rules import RuleStore
         store = RuleStore(path=self.cfg.approval_rules_file)
         store.persist_rule("execute", "office/scripts/**", "approval",

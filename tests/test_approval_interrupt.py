@@ -4,7 +4,7 @@
 - 类型单测:ApprovalRequest 字段定稿 / ApprovalDecision 答案类型(source 与审计
   共用 DecisionSource)/ TurnOrigin 回合来源枚举
 - 假 LLM 驱动引擎测试:人来源回合 interrupt→应答→Command resume 放行/拒绝/
-  永久允许铸规则/超时即拒;心跳来源构造上永不 interrupt;TOCTOU(批准后参数
+  永久允许入规则/超时即拒;心跳来源构造上永不 interrupt;TOCTOU(批准后参数
   变更即拒);文本前缀标记不再影响来源判定
 - 基准应答档位哨兵:bench_pipeline 不消费逐事件流,门在缺省(无人)形态
   永不打断;有人档(06 票)经 attended 参数显式开启,行为测试在
@@ -322,7 +322,7 @@ class TestInterruptApproveAndDeny(unittest.TestCase):
 
 
 class TestPersistMintsRule(unittest.TestCase):
-    """永久允许:persist=true 铸规则 + rule_persisted 入审计,之后同调用静默。"""
+    """永久允许:persist=true 入规则 + rule_persisted 入审计,之后同调用静默。"""
 
     def test_persist_then_next_call_silent_rule_auto(self):
         calls = []
@@ -350,7 +350,7 @@ class TestPersistMintsRule(unittest.TestCase):
         # 第一回合:问了人,永久允许;两回合都真实执行
         self.assertIn(ApprovalRequest, [type(e) for e in first])
         self.assertEqual(len(calls), 2)
-        # 第二回合:规则已铸,静默放行,不再问人
+        # 第二回合:规则已写入,静默放行,不再问人
         self.assertNotIn(ApprovalRequest, [type(e) for e in second])
         self.assertEqual(len(asked), 1, "永久允许之后同调用不得再问人")
 
@@ -376,7 +376,7 @@ class TestPersistMintsRule(unittest.TestCase):
 
         with open(path, encoding="utf-8") as f:
             entries = json.load(f)
-        self.assertEqual(len(entries), 1, "永久允许铸出恰好一条规则")
+        self.assertEqual(len(entries), 1, "永久允许写入恰好一条规则")
         self.assertEqual(entries[0]["action"], "write")
         self.assertEqual(entries[0]["scope"], "office/reports/daily.md")
         self.assertEqual(entries[0]["source"], "approval")

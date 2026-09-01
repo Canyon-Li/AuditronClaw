@@ -43,7 +43,7 @@ from .hooks import ToolCallContext, ToolHook
 EVENT_APPROVAL_REQUESTED = "approval_requested"
 EVENT_APPROVAL_DECISION = "approval_decision"
 EVENT_RULE_PERSISTED = "rule_persisted"
-EVENT_RULE_REVOKED = "rule_revoked"  # 02 票:撤销留痕(管理面,与铸规则对称)
+EVENT_RULE_REVOKED = "rule_revoked"  # 02 票:撤销留痕(管理面,与入规则对称)
 
 
 class DecisionSource(str, Enum):
@@ -51,7 +51,7 @@ class DecisionSource(str, Enum):
 
     RULE_AUTO = "rule_auto"        # 既定规则自动放行(02 票)
     USER_ONCE = "user_once"        # 人批准一次(03/04 票)
-    USER_PERSIST = "user_persist"  # 人批准并"永久允许"铸规则(02/04 票)
+    USER_PERSIST = "user_persist"  # 人批准并"永久允许"入规则(02/04 票)
     TIMEOUT = "timeout"            # 审批等待超时=拒绝(03 票)
     UNATTENDED = "unattended"      # 无人值守且无规则:拒绝并继续
 
@@ -76,7 +76,7 @@ class ApprovalDecision:
     """审批应答:应答通道(TUI/Web)对 ApprovalRequest 的答案。
 
     approved 一次生效;persist=true 在批准之外按本次分级的动作×目标作用域
-    铸规则(02 票 persist_rule),之后的同调用静默放行;source 与审计事件
+    入规则(02 票 persist_rule),之后的同调用静默放行;source 与审计事件
     共用 DecisionSource,应答方按答复档位给 user_once/user_persist。
     """
 
@@ -118,9 +118,9 @@ def rejection_text(tool_name: str, assessment: RiskAssessment,
         return head + "操作员已明确拒绝本次调用，未执行。请调整方案或与操作员确认后再试。"
     if source == DecisionSource.TIMEOUT:
         return (head + "审批等待超时（无人应答），已按拒绝处理，本次调用未执行。"
-                "如确属日常合法操作，请在场及时应答或铸审批规则后再试。")
+                "如确属日常合法操作，请在场及时应答或先\"永久允许\"后再试。")
     return (head + "当前无人值守且无匹配审批规则，本次调用未执行。"
-            "如属日常合法操作，请在有人交互时批准或铸审批规则后再试。")
+            "如属日常合法操作，请在有人交互时批准或\"永久允许\"后再试。")
 
 
 # 规则匹配器契约(02 票实现,此处只定签名):
@@ -159,7 +159,7 @@ def _log_approval_decision(thread_id: str, tool_name: str,
 
 
 def log_rule_persisted(thread_id: str, rule: dict) -> None:
-    """规则铸成事件(02 票接线;形状此处定死:条目整体搭载)。"""
+    """规则写入事件(02 票接线;形状此处定死:条目整体搭载)。"""
     get_audit_logger().log_event(
         thread_id=thread_id,
         event=EVENT_RULE_PERSISTED,
@@ -202,10 +202,10 @@ def _turn_origin(config: dict) -> TurnOrigin:
 
 
 def _mint_persist_rules(rule_store, thread_id: str, assessment: RiskAssessment) -> None:
-    """persist=true 的批准铸规则(02 票 persist_rule 的主轨接线)。
+    """persist=true 的批准入规则(02 票 persist_rule 的主轨接线)。
 
-    按本次分级的动作 × 每个目标作用域铸;提不出目标作用域(unclassified/
-    外接)或动作不可铸时铸不出——批准仍只管本次,不放大。铸规则失败
+    按本次分级的动作 × 每个目标作用域逐条入规则;提不出目标作用域(unclassified/
+    外接)或动作不可入规则时写不成——批准仍只管本次,不放大。入规则失败
     (含落盘 OSError)不影响本次批准照常执行,只留 system_action 可查。
     duck-typed 调 rule_store(门不 import 规则模块,避免环:rules 反向
     import 本模块)。
@@ -219,7 +219,7 @@ def _mint_persist_rules(rule_store, thread_id: str, assessment: RiskAssessment) 
         except (ValueError, KeyError, OSError) as e:
             get_audit_logger().log_event(
                 thread_id=thread_id, event="system_action",
-                content=f"审批规则铸出失败,本次批准仍只生效一次:{e}")
+                content=f"审批规则写入失败,本次批准仍只生效一次:{e}")
             return
 
 
@@ -292,7 +292,7 @@ def wrap_tool(
                                    approved=decision.approved,
                                    source=decision.source)
             if decision.approved:
-                # 永久允许:决定留痕之后铸规则(rule_persisted 是决定的后果)
+                # 永久允许:决定留痕之后入规则(rule_persisted 是决定的后果)
                 if decision.persist:
                     _mint_persist_rules(rule_store, thread_id, assessment)
                 return True, None

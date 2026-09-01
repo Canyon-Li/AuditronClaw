@@ -78,7 +78,7 @@ PRODUCTION_RULE_FIXTURES = (
 
 
 def preset_production_rules(workspace: WorkspaceConfig) -> None:
-    """把生产同款规则铸进本用例 workspace(经 RuleStore 单一写路径)。
+    """把生产同款规则写入本用例 workspace(经 RuleStore 单一写路径)。
 
     规则文件落点由装配注入(workspace.approval_rules_file,05 票):
     夹具规则写进用例临时工作区,操作员本地规则文件不被触碰。出处
@@ -95,7 +95,7 @@ def preset_production_rules(workspace: WorkspaceConfig) -> None:
 def _approve_all(_request) -> ApprovalDecision:
     """golden 档应答器:有人且都批——未匹配规则的高危一律批准一次。
 
-    persist=False 不铸规则:生产规则形状不因基准漂移,决定留痕
+    persist=False 不入规则:生产规则形状不因基准漂移,决定留痕
     source=user_once(审批摩擦不是 golden 度量的对象)。
     """
     return ApprovalDecision(approved=True, persist=False,

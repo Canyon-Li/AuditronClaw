@@ -163,7 +163,7 @@ def format_approval_block(request: ApprovalRequest) -> str:
 def format_decision_echo(decision: ApprovalDecision) -> str:
     """应答回显:操作员看得见自己的批复成了什么。"""
     if decision.approved and decision.persist:
-        return "  \033[32m✓ 已批准并铸规则(永久允许)\033[0m"
+        return "  \033[32m✓ 已批准并永久允许\033[0m"
     if decision.approved:
         return "  \033[32m✓ 已批准(仅本次)\033[0m"
     return "  \033[31m✗ 已拒绝\033[0m"
@@ -312,7 +312,7 @@ def _short_id(rule_id: str) -> str:
 
 
 def format_rules_table(rules: List[ApprovalRule]) -> str:
-    """规则清单:动作/作用域/出处/铸成时间逐条一行(管理面可查)。"""
+    """规则清单:动作/作用域/出处/创建时间逐条一行(管理面可查)。"""
     if not rules:
         return ("  📋 审批规则清单(0 条)—— 冷启动:尚无规则;"
                 "每条生产规则的第一现场都是一次真实审批")
