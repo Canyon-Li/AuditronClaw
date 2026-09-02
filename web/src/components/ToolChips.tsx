@@ -1,21 +1,25 @@
 /* 组件取自 beautifului.dev(https://www.beautifului.dev/),站页 copy-paste 分发
  * 组件名 Tool Chips · 取用日期 2026-09-01 · MIT · Copyright (c) 2026 Shane Levine
- * 本仓改动:仅按本仓 lint 规则把 1 处三元语句改为 if/else(无行为变化),其余原样 */
+ * 本仓改动:取件 + 操作员原型改造(2026-09-02)——撤掉站方画廊的逐行 700ms
+ * 逐格演示(真实流里行即时呈现,入场动画保留);diffs 为空不再渲染底部分隔
+ * 与空 more 按钮;详情行改为换行呈现不截断(参数 JSON 需完整可读);
+ * 触屏断点行高 34px。
+ * 13 票(2026-09-02 第四轮,操作员最新版设计):行首图标常驻(撤取件的
+ * 悬停换形),开合指示改行尾常驻 chev,与分组头/历史折叠/回执同一语言;
+ * 详情区左界竖线改 ⎿ 回钩(绝对定位、恒最淡墨,不随行染色)。 */
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { createPortal } from "react-dom";
 
 /* ─────────────────────────────────────────────────────────
  * TOOL CHIPS
  * An agent run as compact rows: tool calls with inline
  * chips, then file-diff chips summarizing the edits.
- * Hover a row to reveal its chevron; every row expands
- * to show what the tool actually did.
+ * A persistent trailing chevron marks every row as
+ * expandable; open a row to see what the tool did.
  * ───────────────────────────────────────────────────────── */
-
-const STEP_MS = 700;
 
 const Icons: Record<string, React.ReactNode> = {
   think: <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z" />,
@@ -128,7 +132,6 @@ export default function ToolChips({
   onToggleRow?: (label: string, open: boolean) => void;
 } = {}) {
   const copy = { ...DEFAULT_LABELS, ...labels };
-  const [step, setStep] = useState(0);
   const [open, setOpen] = useState(true);
   const [openRows, setOpenRows] = useState<Set<string>>(new Set());
   /* Rendered in a body portal so animated/translated reply wrappers cannot
@@ -153,13 +156,6 @@ export default function ToolChips({
   };
   const closePreview = (file: string) => () =>
     setPreview((current) => (current?.file === file ? null : current));
-  const total = steps.length + 1; // rows, then diff chips
-
-  useEffect(() => {
-    if (step >= total) return;
-    const t = setTimeout(() => setStep((s) => s + 1), STEP_MS);
-    return () => clearTimeout(t);
-  }, [step, total]);
 
   const toggleRow = (label: string) =>
     setOpenRows((current) => {
@@ -171,7 +167,7 @@ export default function ToolChips({
     });
 
   return (
-    <div className={`min-h-[220px] w-full max-w-80 pb-1${className ? ` ${className}` : ""}`}>
+    <div className={`w-full pb-1${className ? ` ${className}` : ""}`}>
       {/* collapsed run header */}
       <button
         type="button"
@@ -196,7 +192,7 @@ export default function ToolChips({
             row hover pills room inside this overflow-hidden clip box */}
         <div className="-mx-1 overflow-hidden px-1.5 pb-1">
         <div className="mt-1.5 flex flex-col gap-1">
-          {steps.slice(0, step).map((row) => {
+          {steps.map((row) => {
             const rowOpen = openRows.has(row.label);
             return (
             <div key={row.label} style={{ animation: "fade-up 300ms cubic-bezier(0.23,1,0.32,1) both" }}>
@@ -204,21 +200,13 @@ export default function ToolChips({
                 type="button"
                 aria-expanded={rowOpen}
                 onClick={() => toggleRow(row.label)}
-                className="group/row -mx-[3px] flex h-7 w-[calc(100%+6px)] min-w-0 items-center gap-2 rounded-control px-[3px] text-left transition-colors duration-100 hover:bg-hover-2"
+                className="-mx-[3px] flex h-7 w-[calc(100%+6px)] min-w-0 items-center gap-2 rounded-control px-[3px] text-left transition-colors duration-100 hover:bg-hover-2 max-[600px]:h-8.5"
               >
-                <span className="relative flex size-4 shrink-0 items-center justify-center text-ink-3">
+                <span className="grid size-4 shrink-0 place-items-center text-ink-3">
                   <svg
                     width="13" height="13" viewBox="0 0 24 24" fill={row.icon === "think" ? "currentColor" : "none"} stroke="currentColor"
-                    className={`transition-opacity duration-100 group-hover/row:opacity-0 ${rowOpen ? "opacity-0" : ""}`}
                   >
                     {Icons[row.icon]}
-                  </svg>
-                  <svg
-                    width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
-                    className={`absolute transition-[opacity,transform] duration-150 group-hover/row:opacity-100 ${rowOpen ? "opacity-100" : "opacity-0"}`}
-                    style={{ transform: rowOpen ? "rotate(0deg)" : "rotate(-90deg)" }}
-                  >
-                    <path d="M6 9l6 6 6-6" />
                   </svg>
                 </span>
                 <span className="shrink-0 text-[12.5px] font-medium text-ink">{row.label}</span>
@@ -229,6 +217,17 @@ export default function ToolChips({
                 >
                   {row.chip}
                 </span>
+                {/* 行尾常驻 chev(13 票):整行可点的常驻字形,chip 是 flex-1
+                    使之贴右缘;旋转语义与分组头/历史折叠/回执一致 */}
+                <span className="grid size-4 shrink-0 place-items-center text-ink-3">
+                  <svg
+                    width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+                    className="transition-transform duration-200"
+                    style={{ transform: rowOpen ? "rotate(0deg)" : "rotate(-90deg)" }}
+                  >
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </span>
               </button>
 
               {/* expanded detail */}
@@ -237,11 +236,17 @@ export default function ToolChips({
                 style={{ gridTemplateRows: rowOpen ? "1fr" : "0fr", opacity: rowOpen ? 1 : 0, transitionTimingFunction: "cubic-bezier(0.23, 1, 0.32, 1)" }}
               >
                 <div className="min-h-0 overflow-hidden">
-                  <div className="mt-0.5 mb-1 ml-2 flex flex-col gap-0.5 border-l border-line py-0.5 pl-3.5">
-                    {row.detail.map((line) => (
+                  <div className="relative mt-0.5 mb-1 ml-2 flex flex-col gap-0.5 py-0.5 pl-3.5">
+                    {/* ⎿ 回钩(13 票):结果行从属于动作行的记号。绝对定位
+                        不占行内排版(不参与 anywhere 折行计算);色恒最淡
+                        墨——钩标从属,不随行增减染色 */}
+                    <span aria-hidden="true" className="absolute top-0.5 left-px font-mono text-[11px] leading-[1.65] text-ink-3">
+                      ⎿
+                    </span>
+                    {row.detail.map((line, index) => (
                       <span
-                        key={line.text}
-                        className={`truncate text-[11.5px] leading-[1.6] ${row.detailMono ? "font-mono" : ""} ${line.tone === "add" ? "text-green" : "text-ink-2"}`}
+                        key={`${index}:${line.text}`}
+                        className={`text-[11.5px] leading-[1.6] [overflow-wrap:anywhere] ${row.detailMono ? "font-mono" : ""} ${line.tone === "add" ? "text-green" : "text-ink-2"}`}
                       >
                         {line.text}
                       </span>
@@ -255,7 +260,7 @@ export default function ToolChips({
         </div>
 
       {/* file-diff chips */}
-      {step >= total && (
+      {diffs.length > 0 && (
         <div className="mt-2.5 flex max-w-full flex-wrap gap-1.5 border-t border-line pt-2.5">
           {diffs.map((d, i) => (
             <span

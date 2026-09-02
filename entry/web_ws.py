@@ -18,6 +18,11 @@
 - approval_request 的 payload 带 timeout_seconds:引擎审批超时的真实值
   (构造期读 AUDITRONCLAW_APPROVAL_TIMEOUT,默认 300)——不答即拒的
   期限在引擎,客户端倒计时以此为限,不自设期限
+- approval_request 的 payload 对 write_office_file 另带可选 diff 与
+  filename(12 票:写前只读旧文件算出的统一 diff 预览,行形
+  [{t: "ctx"|"add"|"del"|"h", text: 含前缀字符的整行}]+归一化相对路径;
+  无变更/参数不可信/路径越界时不带,客户端回落整段内容预览)。
+  字段可选,旧客户端可忽略——契约向后兼容
 - protocol_error 由服务进程自身产生:seq=0(不与流事件冲突,流自 1 起)、
   origin="server",不入事件缓存
 - seq:进程内单调、从 1 起,仅后端进程重启回卷;重启后的历史重建

@@ -28,11 +28,13 @@ payload 附引擎真实超时(timeout_seconds),卡面倒计时以此为限。
 import asyncio
 import itertools
 import logging
+import os
 import threading
 from collections import deque
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Iterable, Optional
+from difflib import unified_diff
+from typing import Awaitable, Callable, Iterable, Mapping, Optional
 
 from langchain_core.messages import AnyMessage
 
@@ -51,6 +53,7 @@ from auditronclaw.core.session import (
     TurnEvent,
     TurnTrajectory,
 )
+from auditronclaw.core.tools.sandbox_tools import _resolve_office_path
 from entry.web_approval import WebApprovalBridge
 
 logger = logging.getLogger(__name__)
@@ -100,6 +103,59 @@ def serialize_turn_event(event: TurnEvent) -> tuple[str, dict]:
             "reply": trajectory.reply,
         }
     raise TypeError(f"未知回合事件类型: {type(event).__name__}")
+
+
+# ============ write 审批复预览:统一 diff 行(payload 可选字段,12 票) ============
+#
+# 审批门批的是改动本身:write_office_file 的审批帧带新旧内容的统一 diff
+# 行数组({t: ctx|add|del|h, text 含前缀字符}),前端按行分色呈现。
+# 读旧文件是纯读(写尚未发生);任何提不出可信输入的场合返回 None,
+# payload 不带 diff,前端回落整段内容预览(fail-closed,与执行判定同向)。
+
+_DIFF_LINE_KINDS = {" ": "ctx", "+": "add", "-": "del"}
+
+
+def build_write_diff(office_dir: str, args: Mapping) -> "Optional[tuple[list, str]]":
+    """write_office_file 审批预览的统一 diff 行数组(纯读,不执行写)。
+
+    返回 (行数组, 归一化相对路径);filepath/content 形状不符、mode 非法、
+    路径越界、office_dir 未装配或新旧无差异时返回 None(调用方回落整段
+    内容预览)。路径解析与执行同源(_resolve_office_path,office 根基准化
+    + 越界拦截);追加模式按工具的落盘形态补换行(防粘连的那一枚)。
+    """
+    if not office_dir:
+        return None
+    filepath, content = args.get("filepath"), args.get("content")
+    if not isinstance(filepath, str) or not filepath or not isinstance(content, str):
+        return None
+    mode = args.get("mode", "w")
+    if mode not in ("w", "a"):
+        return None
+    try:
+        target_path, normalized = _resolve_office_path(office_dir, filepath)
+    except PermissionError:
+        return None
+    old = ""
+    if os.path.exists(target_path):
+        with open(target_path, "r", encoding="utf-8", errors="ignore") as f:
+            old = f.read()
+    if mode == "a":
+        separator = "" if not content or content.startswith("\n") else "\n"
+        new = old + separator + content
+    else:
+        new = content
+    lines = list(unified_diff(old.splitlines(), new.splitlines(), lineterm=""))
+    if not lines:
+        return None
+    rows: list = []
+    for index, line in enumerate(lines):
+        # 头两行是 unified_diff 的文件头(from/to 未具名,'--- '/'+++ ');
+        # 之后的同前缀行是真删除/真内容,原样保留
+        if index < 2 and (line.startswith("---") or line.startswith("+++")):
+            continue
+        kind = "h" if line.startswith("@@") else _DIFF_LINE_KINDS.get(line[:1], "ctx")
+        rows.append({"t": kind, "text": line})
+    return rows, normalized.replace("\\", "/")
 
 
 # ============ 重启历史重建:checkpointer 存档 → 消息级事件 ============
@@ -228,7 +284,8 @@ class BackendOwner:
                  cache_size: int = DEFAULT_CACHE_SIZE,
                  audit_buffer: int = DEFAULT_AUDIT_BUFFER,
                  approval: Optional[WebApprovalBridge] = None,
-                 resources: Optional[AsyncExitStack] = None):
+                 resources: Optional[AsyncExitStack] = None,
+                 office_dir: str = ""):
         self.engine = engine
         self.tasks_file = tasks_file
         self.check_interval = check_interval
@@ -238,6 +295,9 @@ class BackendOwner:
         # (真实装配经 approval 参数显式传入;直构缺省自建——此时引擎没有
         # 应答通道,decision 帧永远无物可答,与未装配同形)
         self.approval = approval or WebApprovalBridge()
+        # office 沙盒根:write 审批复预览的 diff 取旧文件用(纯读);
+        # 未装配(直构/测试)不产 diff,payload 不带字段,前端回落整段预览
+        self.office_dir = office_dir
         self.queue: "asyncio.Queue[TurnRequest | str]" = asyncio.Queue()
         self._resources = resources
         self._tasks: list[asyncio.Task] = []
@@ -352,6 +412,13 @@ class BackendOwner:
                         # 审批帧附引擎真实超时(Q10:AUDITRONCLAW_APPROVAL_TIMEOUT
                         # 构造期可配):不答即拒的期限在引擎,卡面倒计时以此为限
                         payload["timeout_seconds"] = self.engine.approval_timeout
+                        # write 类文件写入附统一 diff 预览(12 票):操作员批的
+                        # 是改动本身;提不出可信 diff 时 payload 不带字段,
+                        # 前端回落整段内容预览
+                        if event.tool == "write_office_file" and self.office_dir:
+                            preview = build_write_diff(self.office_dir, event.args)
+                            if preview is not None:
+                                payload["diff"], payload["filename"] = preview
                     self._broadcast(self.cache.append(type_, origin.value, payload))
             except Exception as exc:
                 # CancelledError 不在此列:取消即属主停机,原样上抛交 stop 收口
@@ -389,6 +456,6 @@ def assemble_backend_owner(*, thread_id: str, provider_name: str,
         engine = SessionEngine(app, thread_id, approval_responder=bridge.responder)
         return BackendOwner(engine=engine, tasks_file=workspace.tasks_file,
                             check_interval=check_interval, approval=bridge,
-                            resources=resources)
+                            resources=resources, office_dir=workspace.office_dir)
 
     return _factory

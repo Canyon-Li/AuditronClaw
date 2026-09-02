@@ -1,10 +1,13 @@
 /*
  * 设计令牌与基础样式,取自 beautifului.dev(https://www.beautifului.dev/)站方 globals.css
  * 取用:2026-09-01 · MIT · Copyright (c) 2026 Shane Levine
- * 本仓改动:只保留通用基础(令牌 / @theme / 基础规则 / primitive 间距 / 共享 keyframes),
- * 裁掉暗色模式与站内其他组件的专属块(站方文件自带"按组件取用"标注);
- * 字体映射改为系统栈(站方 webfont 未随取件分发);阴影基标量来自
- * shadow-plugin@2.1.0(npm,MIT),与站方原文的 @import 声明一致。
+ * 本仓改动:取件 + 操作员原型改造(2026-09-02)——只保留通用基础(令牌 / @theme /
+ * 基础规则 / primitive 间距 / 共享 keyframes),裁掉暗色模式与站内其他组件的专属块
+ * (站方文件自带"按组件取用"标注);字体映射改为系统栈(站方 webfont 未随取件分发);
+ * 阴影基标量来自 shadow-plugin@2.1.0(npm,MIT),与站方原文的 @import 声明一致。
+ * 2026-09-02 起:去 body 斜纹演示纹理(底色 var(--page));补 pulse / blink / wave
+ * 三个共享 keyframes(状态 pill 点色 / 回复光标 / 等待三点,操作员 v2 原型定义);
+ * 同日第二轮(问答分离与审批时刻):补 stamp-in(审批落章弹入)。
  */
 @import 'tailwindcss';
 @import 'shadow-plugin/unprefixed';
@@ -36,8 +39,6 @@
   --line-soft: oklch(0.966 0.002 264.542);
   --grid-line: color-mix(in srgb, var(--line) 78%, transparent);
   --field: oklch(0.961 0.001 286.375);
-  --stripe: oklch(0.405 0 0 / 0.075);
-  --stripe-bg: oklch(0.97 0 0);
 
   /* accent */
   --accent: oklch(0.626 0.205 254.947);
@@ -82,6 +83,7 @@
   --color-field: var(--field);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
+  --color-line-soft: var(--line-soft);
   --color-accent: var(--accent);
   --color-accent-ink: var(--accent-ink);
   --color-accent-tint: var(--accent-tint);
@@ -126,16 +128,7 @@ html {
 }
 
 body {
-  background-color: var(--stripe-bg);
-  background-image: repeating-linear-gradient(
-    -45deg,
-    transparent 0,
-    transparent 7px,
-    var(--stripe) 7px,
-    var(--stripe) 8px
-  );
-  /* Pin the stripe pattern to the viewport so it stays put on scroll. */
-  background-attachment: fixed;
+  background: var(--page);
   color: var(--ink);
   font-feature-settings: 'cv11', 'ss01';
   font-size: 14px;
@@ -263,6 +256,41 @@ a:focus-visible .animated-underline::after {
   }
 }
 
+/* 操作员 v2 原型(2026-09-02)定义的三个界面动画 */
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes wave {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
 @keyframes fade-in {
   from {
     opacity: 0;
@@ -280,6 +308,24 @@ a:focus-visible .animated-underline::after {
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+/* 审批落章(操作员原型 v2-2 第二轮,2026-09-02):大角度斜盖 + 过冲回弹,
+ * 终态停在 rotate(-12deg) —— animation both 保持终帧,reduced-motion 兜底
+ * 直接落终态 */
+@keyframes stamp-in {
+  0% {
+    opacity: 0;
+    transform: rotate(-24deg) scale(1.7);
+  }
+  60% {
+    opacity: 0.95;
+    transform: rotate(-11deg) scale(0.96);
+  }
+  100% {
+    opacity: 0.9;
+    transform: rotate(-12deg) scale(1);
   }
 }
 

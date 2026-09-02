@@ -1,10 +1,18 @@
 /* 组件取自 beautifului.dev(https://www.beautifului.dev/),站页 copy-paste 分发
  * 组件名 Streaming Text · 取用日期 2026-09-01 · MIT · Copyright (c) 2026 Shane Levine
- * 本仓改动:原样落位,未改源码 */
+ * 本仓改动:取件 + 操作员原型改造(2026-09-02)——正文与光标对齐 v2 原型的
+ * 回复形态(13.5px/1.7、光标闪烁);来源/跟进/操作行仅在传入非空时渲染,
+ * 真实回合流无这三者,不再铺空壳。同日间隙修复(11 票):去掉取件给英文
+ * 逐词流硬加的词后空格——本仓分帧保留源空格,该空格在中文两字一帧的
+ * 场景成了字间假空隙;正文改 whitespace-pre-wrap,原文空格与换行如实呈现,
+ * 不再被默认空白折叠改写。12 票:流完整体替换为 Markdown-lite 渲染结果
+ * (围栏码块/行内码/```diff 分色,见 markdownLite)——流式阶段照原文
+ * 逐帧出字带光标,半截围栏不逐帧解析;容器 p→div 以嵌块级码块。 */
 
 "use client";
 
 import { useEffect, useState } from "react";
+import { renderMarkdownLite } from "../markdownLite";
 
 /* ─────────────────────────────────────────────────────────
  * STREAMING TEXT
@@ -137,27 +145,36 @@ export default function StreamingText({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [count, done, loop]);
 
+  const hasExtras = sources.length > 0 || followUps.length > 0;
+
   return (
     <div className={fill ? "w-full" : "min-h-[15.5rem] w-full max-w-95"}>
-      <p className="text-[13px] leading-relaxed text-ink">
-        {content.slice(0, count).map((token, i) =>
-          token.cite ? (
-            <SourceChip key={i} source={sources[0]} />
-          ) : (
-            <span key={i} className="inline">
-              {token.text}{" "}
-            </span>
-          ),
+      <div className="text-pretty text-[13.5px] leading-[1.7] whitespace-pre-wrap text-ink max-[600px]:text-[13px]">
+        {done ? (
+          /* 流完:整体替换为 Markdown-lite 解析结果(码块/行内码此刻成形) */
+          renderMarkdownLite(content.map((token) => token.text).join(""))
+        ) : (
+          <>
+            {content.slice(0, count).map((token, i) =>
+              token.cite ? (
+                <SourceChip key={i} source={sources[0]} />
+              ) : (
+                <span key={i} className="inline">
+                  {token.text}
+                </span>
+              ),
+            )}
+            <span
+              className="ml-0.5 inline-block h-[15px] w-[7px] translate-y-[-2px] rounded-[1px] bg-ink-2"
+              style={{ animation: "blink 1s steps(2) infinite" }}
+            />
+          </>
         )}
-        {!done && (
-          <span
-            className="ml-0.5 inline-block h-3 w-0.5 translate-y-0.5 rounded-full bg-ink"
-            style={{ animation: "fade-in 150ms ease-out both" }}
-          />
-        )}
-      </p>
+      </div>
 
-      {/* action icons row */}
+      {/* action icons row — 仅在带来源/跟进的真实场景渲染 */}
+      {hasExtras && (
+      <>
       <div
         className="mt-2 flex items-center gap-0.5 transition-opacity duration-400"
         style={{ opacity: done ? 1 : 0, pointerEvents: done ? "auto" : "none" }}
@@ -225,7 +242,10 @@ export default function StreamingText({
       {/* follow-ups */}
       <div
         className="mt-2.5 transition-opacity duration-400"
-        style={{ opacity: done ? 1 : 0, pointerEvents: done ? "auto" : "none" }}
+        style={{
+          opacity: done && followUps.length > 0 ? 1 : 0,
+          pointerEvents: done && followUps.length > 0 ? "auto" : "none",
+        }}
       >
         <p className="text-[12px] font-medium text-ink-2">{l.followUps}</p>
         <div className="mt-0.5 flex flex-col">
@@ -251,6 +271,8 @@ export default function StreamingText({
           ))}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }
