@@ -3,7 +3,10 @@
  * 本仓改动:取件 + 操作员原型改造(2026-09-02)——撤掉站方画廊的逐行 700ms
  * 逐格演示(真实流里行即时呈现,入场动画保留);diffs 为空不再渲染底部分隔
  * 与空 more 按钮;详情行改为换行呈现不截断(参数 JSON 需完整可读);
- * 触屏断点行高 34px。 */
+ * 触屏断点行高 34px。
+ * 13 票(2026-09-02 第四轮,操作员最新版设计):行首图标常驻(撤取件的
+ * 悬停换形),开合指示改行尾常驻 chev,与分组头/历史折叠/回执同一语言;
+ * 详情区左界竖线改 ⎿ 回钩(绝对定位、恒最淡墨,不随行染色)。 */
 
 "use client";
 
@@ -14,8 +17,8 @@ import { createPortal } from "react-dom";
  * TOOL CHIPS
  * An agent run as compact rows: tool calls with inline
  * chips, then file-diff chips summarizing the edits.
- * Hover a row to reveal its chevron; every row expands
- * to show what the tool actually did.
+ * A persistent trailing chevron marks every row as
+ * expandable; open a row to see what the tool did.
  * ───────────────────────────────────────────────────────── */
 
 const Icons: Record<string, React.ReactNode> = {
@@ -197,21 +200,13 @@ export default function ToolChips({
                 type="button"
                 aria-expanded={rowOpen}
                 onClick={() => toggleRow(row.label)}
-                className="group/row -mx-[3px] flex h-7 w-[calc(100%+6px)] min-w-0 items-center gap-2 rounded-control px-[3px] text-left transition-colors duration-100 hover:bg-hover-2 max-[600px]:h-8.5"
+                className="-mx-[3px] flex h-7 w-[calc(100%+6px)] min-w-0 items-center gap-2 rounded-control px-[3px] text-left transition-colors duration-100 hover:bg-hover-2 max-[600px]:h-8.5"
               >
-                <span className="relative flex size-4 shrink-0 items-center justify-center text-ink-3">
+                <span className="grid size-4 shrink-0 place-items-center text-ink-3">
                   <svg
                     width="13" height="13" viewBox="0 0 24 24" fill={row.icon === "think" ? "currentColor" : "none"} stroke="currentColor"
-                    className={`transition-opacity duration-100 group-hover/row:opacity-0 ${rowOpen ? "opacity-0" : ""}`}
                   >
                     {Icons[row.icon]}
-                  </svg>
-                  <svg
-                    width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
-                    className={`absolute transition-[opacity,transform] duration-150 group-hover/row:opacity-100 ${rowOpen ? "opacity-100" : "opacity-0"}`}
-                    style={{ transform: rowOpen ? "rotate(0deg)" : "rotate(-90deg)" }}
-                  >
-                    <path d="M6 9l6 6 6-6" />
                   </svg>
                 </span>
                 <span className="shrink-0 text-[12.5px] font-medium text-ink">{row.label}</span>
@@ -222,6 +217,17 @@ export default function ToolChips({
                 >
                   {row.chip}
                 </span>
+                {/* 行尾常驻 chev(13 票):整行可点的常驻字形,chip 是 flex-1
+                    使之贴右缘;旋转语义与分组头/历史折叠/回执一致 */}
+                <span className="grid size-4 shrink-0 place-items-center text-ink-3">
+                  <svg
+                    width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+                    className="transition-transform duration-200"
+                    style={{ transform: rowOpen ? "rotate(0deg)" : "rotate(-90deg)" }}
+                  >
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </span>
               </button>
 
               {/* expanded detail */}
@@ -230,7 +236,13 @@ export default function ToolChips({
                 style={{ gridTemplateRows: rowOpen ? "1fr" : "0fr", opacity: rowOpen ? 1 : 0, transitionTimingFunction: "cubic-bezier(0.23, 1, 0.32, 1)" }}
               >
                 <div className="min-h-0 overflow-hidden">
-                  <div className="mt-0.5 mb-1 ml-2 flex flex-col gap-0.5 border-l border-line py-0.5 pl-3.5">
+                  <div className="relative mt-0.5 mb-1 ml-2 flex flex-col gap-0.5 py-0.5 pl-3.5">
+                    {/* ⎿ 回钩(13 票):结果行从属于动作行的记号。绝对定位
+                        不占行内排版(不参与 anywhere 折行计算);色恒最淡
+                        墨——钩标从属,不随行增减染色 */}
+                    <span aria-hidden="true" className="absolute top-0.5 left-px font-mono text-[11px] leading-[1.65] text-ink-3">
+                      ⎿
+                    </span>
                     {row.detail.map((line, index) => (
                       <span
                         key={`${index}:${line.text}`}

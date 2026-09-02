@@ -19,7 +19,10 @@
  * 回合豁免,决定后 350ms 恢复;审批信封 seq 传入卡片供落章署号。
  * 12 票:write 审批带 diff 行数组时传入卡片按改动本身预览(后端写前
  * 只读旧文件算统一 diff,契约可选字段);重启前历史默认收起,头部
- * 整行可点折叠,存档口径说明移入展开区首行。 */
+ * 整行可点折叠,存档口径说明移入展开区首行。
+ * 13 票(2026-09-02 第四轮):页头新增「审计日志」入口,拉出会话事件流
+ * 实时镜像(envelopes 逐帧直读,不另起账本;心跳帧如实可见,与「后台
+ * n 帧」pill 可互证)——主视图信息密度不升一档,留痕交给同源直读。 */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ToolDetailLine, ToolStep } from "./components/ToolChips";
@@ -28,7 +31,8 @@ import PromptBar from "./components/PromptBar";
 import StreamingText, { type StreamingToken } from "./components/StreamingText";
 import ApprovalCard, { type ApprovalChoice } from "./components/ApprovalCard";
 import ApprovalReceipt from "./components/ApprovalReceipt";
-import { ShieldIcon } from "./components/icons";
+import AuditLogDrawer from "./components/AuditLogDrawer";
+import { AuditIcon, ShieldIcon } from "./components/icons";
 import type { DecisionChoice, Envelope } from "./protocol";
 import { useTerminalStream } from "./useTerminalStream";
 
@@ -348,6 +352,7 @@ function TurnSection({
 export default function TerminalPage({ token }: { token: string }) {
   const { status, envelopes, protocolError, sendInput, sendDecision } =
     useTerminalStream(token);
+  const [auditOpen, setAuditOpen] = useState(false);
   const model = useMemo(() => groupTurns(envelopes), [envelopes]);
   const lastTurn = model.turns[model.turns.length - 1];
   const pendingSeq = lastTurn ? pendingApprovalSeq(lastTurn) : null;
@@ -487,6 +492,17 @@ export default function TerminalPage({ token }: { token: string }) {
                 后台 {model.backgroundEvents} 帧
               </span>
             )}
+            {/* 审计日志入口(13 票):pill 形同左侧三枚但可点,拉出事件流镜像 */}
+            <button
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={auditOpen}
+              onClick={() => setAuditOpen(true)}
+              className="inline-flex h-5.5 items-center gap-1.5 whitespace-nowrap rounded-chip bg-field px-2.25 font-mono text-[11.5px] text-ink-2 shadow-hairline transition-colors duration-100 hover:bg-hover-2 hover:text-ink"
+            >
+              <AuditIcon size={11} strokeWidth={1.8} />
+              审计日志
+            </button>
           </div>
         </div>
         {(protocolError || decisionLost !== null) && (
@@ -615,6 +631,13 @@ export default function TerminalPage({ token }: { token: string }) {
           <PromptBar placeholder="输入消息,回车发送…" onSend={handleSend} />
         </div>
       </div>
+
+      {/* 审计日志视图:盖全屏,层序在页头/停靠条/diff 预览之上 */}
+      <AuditLogDrawer
+        envelopes={envelopes}
+        open={auditOpen}
+        onClose={() => setAuditOpen(false)}
+      />
     </div>
   );
 }

@@ -19,3 +19,8 @@ LoadingState 与 Thinking 保留取件原样,终端暂不使用。`icons.tsx`(�
 Diff 视图补 hunk 行与头部复制钮、新增 diffGutter 形态(回复内 diff 围栏
 行号从略);`markdownLite.tsx`(src 根,非取件)渲染回复的围栏码块与
 行内码,全程 ReactNode 不走 innerHTML。仍无新增依赖。
+
+同日第四轮(工具行开合与审计日志):ToolChips 行首图标常驻、行尾常驻
+chev(与分组头/历史折叠/回执同一开合语言),详情区竖线改 ⎿ 回钩;
+`AuditLogDrawer.tsx`(非取件)为会话事件流的实时镜像视图,页头 pill
+入口,数据直读 envelopes 不另起账本。仍无新增依赖。
