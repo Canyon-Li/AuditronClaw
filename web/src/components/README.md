@@ -10,3 +10,7 @@ tailwindcss、@tailwindcss/vite(均 MIT,构建期,无新增运行时依赖)。
 StreamingText / ToolChips / CodeBlock / ApprovalCard),改动说明见各文件头;
 LoadingState 与 Thinking 保留取件原样,终端暂不使用。`icons.tsx`(盾形)与
 `ApprovalReceipt.tsx`(审计回执)为本仓自绘,非取件。
+
+同日第二轮(操作员最新版设计,问答分离与审批时刻):ApprovalCard 补待答
+风险描边、38px 环形倒计时与终局圆形落章,取件原作未含这些形态,为本仓
+自绘延伸;`index.css` 只补 stamp-in keyframes,设计令牌未动,无新增依赖。

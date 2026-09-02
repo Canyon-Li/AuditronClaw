@@ -6,7 +6,8 @@
  * (站方文件自带"按组件取用"标注);字体映射改为系统栈(站方 webfont 未随取件分发);
  * 阴影基标量来自 shadow-plugin@2.1.0(npm,MIT),与站方原文的 @import 声明一致。
  * 2026-09-02 起:去 body 斜纹演示纹理(底色 var(--page));补 pulse / blink / wave
- * 三个共享 keyframes(状态 pill 点色 / 回复光标 / 等待三点,操作员 v2 原型定义)。
+ * 三个共享 keyframes(状态 pill 点色 / 回复光标 / 等待三点,操作员 v2 原型定义);
+ * 同日第二轮(问答分离与审批时刻):补 stamp-in(审批落章弹入)。
  */
 @import 'tailwindcss';
 @import 'shadow-plugin/unprefixed';
@@ -307,6 +308,24 @@ a:focus-visible .animated-underline::after {
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+/* 审批落章(操作员原型 v2-2 第二轮,2026-09-02):大角度斜盖 + 过冲回弹,
+ * 终态停在 rotate(-12deg) —— animation both 保持终帧,reduced-motion 兜底
+ * 直接落终态 */
+@keyframes stamp-in {
+  0% {
+    opacity: 0;
+    transform: rotate(-24deg) scale(1.7);
+  }
+  60% {
+    opacity: 0.95;
+    transform: rotate(-11deg) scale(0.96);
+  }
+  100% {
+    opacity: 0.9;
+    transform: rotate(-12deg) scale(1);
   }
 }
 

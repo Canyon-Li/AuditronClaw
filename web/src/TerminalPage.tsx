@@ -12,7 +12,11 @@
  * pill 化(连接点色 / 审批等待 pulse / 后台帧计数,全前端可推导),阅读列
  * 420px → 760px,输入条停靠式(sticky 底部 + 向下渐变),滚动跟随仅当操作员
  * 已在底部(不打断回看);回合保留输入回显(WS 流不带操作员输入帧,回显
- * 只覆盖本连接生命周期内提交的回合)。 */
+ * 只覆盖本连接生命周期内提交的回合)。
+ * 11 票(2026-09-02 第二轮,规格来自操作员最新版设计):问答分离——输入
+ * 回显改右侧气泡(❯ 前缀),回复与工具轨迹留左侧,轮距 32px;审批时刻
+ * 让位——待答时历史段与其余回合退暗(opacity .45 + 去饱和),审批所在
+ * 回合豁免,决定后 350ms 恢复;审批信封 seq 传入卡片供落章署号。 */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ToolDetailLine, ToolStep } from "./components/ToolChips";
@@ -187,11 +191,17 @@ function tokenizeReply(content: string): StreamingToken[] {
 
 // ============ 原型形态的小件:输入回显 / 等待三点 ============
 
-/** 回合首行的操作员输入回显(原型 .echo 形态)。 */
+/** 回合首行的操作员输入回显(原型 .echo 气泡):右对齐,❯ 终端前缀;
+ * 底色为面层色混入 4% 墨色,右下小角当尾巴(问答分离:问右 / 答左)。 */
 function EchoLine({ text }: { text: string }) {
   return (
-    <p className="font-mono text-[13px] leading-[1.6] text-ink-2 [overflow-wrap:anywhere]">
-      <span className="mr-2 select-none text-ink-3">❯</span>
+    <p
+      className="ml-auto max-w-[85%] rounded-[10px_10px_2px_10px] px-3 py-2 text-right font-mono text-[13px] leading-[1.6] text-ink-2 [overflow-wrap:anywhere] shadow-[0_0_0_1px_var(--line-strong)] max-[600px]:max-w-[90%]"
+      style={{
+        background: "color-mix(in oklab, var(--field), var(--ink) 4%)",
+      }}
+    >
+      <span className="mr-1.5 select-none text-ink-3">❯</span>
       {text}
     </p>
   );
@@ -231,6 +241,7 @@ function TurnSection({
   running,
   echo,
   token,
+  dimmed,
   onDecision,
   remountOf,
 }: {
@@ -239,6 +250,8 @@ function TurnSection({
   /** 本连接内提交、归属于该回合的操作员输入(刷新后 WS 流不带输入帧,无可回显)。 */
   echo: string | null;
   token: string;
+  /** 审批待答的让位态:其余回合退暗,审批所在回合豁免(原型 .turn 原样)。 */
+  dimmed: boolean;
   onDecision: (seq: number, choice: ApprovalChoice, stillPending: boolean) => void;
   /** 应答未送达需重选的审批 seq(该卡重挂载复位,已选态撤回)。 */
   remountOf: number | null;
@@ -261,7 +274,11 @@ function TurnSection({
   const awaitingApproval = pendingSeq !== null;
 
   return (
-    <section className="flex flex-col gap-2.5">
+    <section
+      className={`flex flex-col gap-2.5 transition-[opacity,filter] duration-[350ms] ease ${
+        dimmed ? "opacity-45 saturate-75" : ""
+      }`}
+    >
       {echo && <EchoLine text={echo} />}
       {running && !awaitingApproval && steps.length === 0 && replies.length === 0 && (
         <PendingDots label="会话引擎运行中" />
@@ -292,6 +309,7 @@ function TurnSection({
               reason={event.payload.reason}
               timeoutSeconds={event.payload.timeout_seconds}
               settledByTimeout={settled}
+              requestSeq={event.seq}
               onDecision={(choice) => onDecision(event.seq, choice, !settled)}
             />
             {settled && (
@@ -328,6 +346,9 @@ export default function TerminalPage({ token }: { token: string }) {
   const model = useMemo(() => groupTurns(envelopes), [envelopes]);
   const lastTurn = model.turns[model.turns.length - 1];
   const pendingSeq = lastTurn ? pendingApprovalSeq(lastTurn) : null;
+  /* 审批时刻的让位锚点:待答审批所在回合(全页只可能一处——单 worker
+   * 串行,审批挂起时回合不收尾);其余回合与历史段据此退暗 */
+  const approvalTurn = pendingSeq !== null ? (lastTurn ?? null) : null;
 
   /* 审批应答未送达时撤回该卡已选态(key 换名重挂载),提示重连后重选;
    * 引擎超时兜底,不会无限挂起 */
@@ -480,13 +501,19 @@ export default function TerminalPage({ token }: { token: string }) {
           )}
 
         {model.historyTurns.length > 0 && (
-          <section className="opacity-[0.78]">
+          <section
+            className={`transition-[opacity,filter] duration-[350ms] ease ${
+              approvalTurn !== null
+                ? "opacity-45 saturate-75"
+                : "opacity-[0.78]"
+            }`}
+          >
             <p className="flex items-center gap-3 font-mono text-[11px] tracking-[0.06em] text-ink-3">
               <span className="h-px flex-1 bg-line" />
               服务重启前的历史 · 自动从会话存档恢复,审批过程不还原
               <span className="h-px flex-1 bg-line" />
             </p>
-            <div className="mt-6 flex flex-col gap-6">
+            <div className="mt-6 flex flex-col gap-8">
               {model.historyTurns.map((turn) => (
                 <TurnSection
                   key={turn.key}
@@ -494,6 +521,7 @@ export default function TerminalPage({ token }: { token: string }) {
                   running={false}
                   echo={null}
                   token={token}
+                  dimmed={false}
                   onDecision={handleDecision}
                   remountOf={remountOf}
                 />
@@ -502,7 +530,7 @@ export default function TerminalPage({ token }: { token: string }) {
           </section>
         )}
 
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-8">
           {model.turns.map((turn) => (
             <TurnSection
               key={turn.key}
@@ -510,12 +538,17 @@ export default function TerminalPage({ token }: { token: string }) {
               running={running && turn === lastTurn}
               echo={echoByKey.get(turn.key) ?? null}
               token={token}
+              dimmed={approvalTurn !== null && turn !== approvalTurn}
               onDecision={handleDecision}
               remountOf={remountOf}
             />
           ))}
           {pending && submitted && (
-            <section className="flex flex-col gap-2.5">
+            <section
+              className={`flex flex-col gap-2.5 transition-[opacity,filter] duration-[350ms] ease ${
+                approvalTurn !== null ? "opacity-45 saturate-75" : ""
+              }`}
+            >
               <EchoLine text={submitted.text} />
               <PendingDots label="已入队,等待引擎回合" />
             </section>
