@@ -2,7 +2,10 @@
  * 组件名 Streaming Text · 取用日期 2026-09-01 · MIT · Copyright (c) 2026 Shane Levine
  * 本仓改动:取件 + 操作员原型改造(2026-09-02)——正文与光标对齐 v2 原型的
  * 回复形态(13.5px/1.7、光标闪烁);来源/跟进/操作行仅在传入非空时渲染,
- * 真实回合流无这三者,不再铺空壳 */
+ * 真实回合流无这三者,不再铺空壳。同日间隙修复(11 票):去掉取件给英文
+ * 逐词流硬加的词后空格——本仓分帧保留源空格,该空格在中文两字一帧的
+ * 场景成了字间假空隙;正文改 whitespace-pre-wrap,原文空格与换行如实呈现,
+ * 不再被默认空白折叠改写。 */
 
 "use client";
 
@@ -143,13 +146,13 @@ export default function StreamingText({
 
   return (
     <div className={fill ? "w-full" : "min-h-[15.5rem] w-full max-w-95"}>
-      <p className="text-[13.5px] leading-[1.7] text-ink max-[600px]:text-[13px]">
+      <p className="text-[13.5px] leading-[1.7] whitespace-pre-wrap text-ink max-[600px]:text-[13px]">
         {content.slice(0, count).map((token, i) =>
           token.cite ? (
             <SourceChip key={i} source={sources[0]} />
           ) : (
             <span key={i} className="inline">
-              {token.text}{" "}
+              {token.text}
             </span>
           ),
         )}
