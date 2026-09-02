@@ -16,7 +16,10 @@
  * 11 票(2026-09-02 第二轮,规格来自操作员最新版设计):问答分离——输入
  * 回显改右侧气泡(❯ 前缀),回复与工具轨迹留左侧,轮距 32px;审批时刻
  * 让位——待答时历史段与其余回合退暗(opacity .45 + 去饱和),审批所在
- * 回合豁免,决定后 350ms 恢复;审批信封 seq 传入卡片供落章署号。 */
+ * 回合豁免,决定后 350ms 恢复;审批信封 seq 传入卡片供落章署号。
+ * 12 票:write 审批带 diff 行数组时传入卡片按改动本身预览(后端写前
+ * 只读旧文件算统一 diff,契约可选字段);重启前历史默认收起,头部
+ * 整行可点折叠,存档口径说明移入展开区首行。 */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ToolDetailLine, ToolStep } from "./components/ToolChips";
@@ -310,6 +313,8 @@ function TurnSection({
               timeoutSeconds={event.payload.timeout_seconds}
               settledByTimeout={settled}
               requestSeq={event.seq}
+              diff={event.payload.diff}
+              filename={event.payload.filename}
               onDecision={(choice) => onDecision(event.seq, choice, !settled)}
             />
             {settled && (
@@ -354,6 +359,9 @@ export default function TerminalPage({ token }: { token: string }) {
    * 引擎超时兜底,不会无限挂起 */
   const [remountOf, setRemountOf] = useState<number | null>(null);
   const [decisionLost, setDecisionLost] = useState<number | null>(null);
+
+  /* 重启前历史默认收起(12 票):刷新不打扰,要看再展开 */
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   /* 提交水位线:提交后到本回合首个事件前,队列/引擎侧在信封流上无痕迹,
    * 以已见操作员事件 seq 为水位,新事件出现即视为提交已开跑——纯推导,
@@ -508,24 +516,60 @@ export default function TerminalPage({ token }: { token: string }) {
                 : "opacity-[0.78]"
             }`}
           >
-            <p className="flex items-center gap-3 font-mono text-[11px] tracking-[0.06em] text-ink-3">
+            {/* 头部整行可点:收起时箭头朝右,展开转正(与审批回执折叠同一语言) */}
+            <button
+              type="button"
+              aria-expanded={historyOpen}
+              onClick={() => setHistoryOpen((open) => !open)}
+              className="flex w-full items-center gap-3 py-1 font-mono text-[11px] tracking-[0.06em] text-ink-3 transition-colors duration-100 hover:text-ink-2"
+            >
               <span className="h-px flex-1 bg-line" />
-              服务重启前的历史 · 自动从会话存档恢复,审批过程不还原
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                className="flex-none transition-transform duration-200"
+                style={{ transform: historyOpen ? "rotate(0deg)" : "rotate(-90deg)" }}
+              >
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+              服务重启前的历史 · {model.historyTurns.length} 个回合
               <span className="h-px flex-1 bg-line" />
-            </p>
-            <div className="mt-6 flex flex-col gap-8">
-              {model.historyTurns.map((turn) => (
-                <TurnSection
-                  key={turn.key}
-                  turn={turn}
-                  running={false}
-                  echo={null}
-                  token={token}
-                  dimmed={false}
-                  onDecision={handleDecision}
-                  remountOf={remountOf}
-                />
-              ))}
+            </button>
+            {/* 展开/收起:0fr→1fr 高度过渡(StreamingText 来源列表同法);
+                reduced-motion 由全局兜底直开 */}
+            <div
+              className="grid transition-[grid-template-rows] duration-300"
+              style={{
+                gridTemplateRows: historyOpen ? "1fr" : "0fr",
+                transitionTimingFunction: "cubic-bezier(0.23,1,0.32,1)",
+              }}
+            >
+              <div className="min-h-0 overflow-hidden">
+                <p className="my-2 text-center font-mono text-[10.5px] tracking-[0.02em] text-ink-3">
+                  自动从会话存档恢复,审批过程不还原
+                </p>
+                <div className="flex flex-col gap-8">
+                  {model.historyTurns.map((turn) => (
+                    <TurnSection
+                      key={turn.key}
+                      turn={turn}
+                      running={false}
+                      echo={null}
+                      token={token}
+                      dimmed={false}
+                      onDecision={handleDecision}
+                      remountOf={remountOf}
+                    />
+                  ))}
+                </div>
+              </div>
             </div>
           </section>
         )}

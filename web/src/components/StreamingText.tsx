@@ -5,11 +5,14 @@
  * 真实回合流无这三者,不再铺空壳。同日间隙修复(11 票):去掉取件给英文
  * 逐词流硬加的词后空格——本仓分帧保留源空格,该空格在中文两字一帧的
  * 场景成了字间假空隙;正文改 whitespace-pre-wrap,原文空格与换行如实呈现,
- * 不再被默认空白折叠改写。 */
+ * 不再被默认空白折叠改写。12 票:流完整体替换为 Markdown-lite 渲染结果
+ * (围栏码块/行内码/```diff 分色,见 markdownLite)——流式阶段照原文
+ * 逐帧出字带光标,半截围栏不逐帧解析;容器 p→div 以嵌块级码块。 */
 
 "use client";
 
 import { useEffect, useState } from "react";
+import { renderMarkdownLite } from "../markdownLite";
 
 /* ─────────────────────────────────────────────────────────
  * STREAMING TEXT
@@ -146,23 +149,28 @@ export default function StreamingText({
 
   return (
     <div className={fill ? "w-full" : "min-h-[15.5rem] w-full max-w-95"}>
-      <p className="text-[13.5px] leading-[1.7] whitespace-pre-wrap text-ink max-[600px]:text-[13px]">
-        {content.slice(0, count).map((token, i) =>
-          token.cite ? (
-            <SourceChip key={i} source={sources[0]} />
-          ) : (
-            <span key={i} className="inline">
-              {token.text}
-            </span>
-          ),
+      <div className="text-pretty text-[13.5px] leading-[1.7] whitespace-pre-wrap text-ink max-[600px]:text-[13px]">
+        {done ? (
+          /* 流完:整体替换为 Markdown-lite 解析结果(码块/行内码此刻成形) */
+          renderMarkdownLite(content.map((token) => token.text).join(""))
+        ) : (
+          <>
+            {content.slice(0, count).map((token, i) =>
+              token.cite ? (
+                <SourceChip key={i} source={sources[0]} />
+              ) : (
+                <span key={i} className="inline">
+                  {token.text}
+                </span>
+              ),
+            )}
+            <span
+              className="ml-0.5 inline-block h-[15px] w-[7px] translate-y-[-2px] rounded-[1px] bg-ink-2"
+              style={{ animation: "blink 1s steps(2) infinite" }}
+            />
+          </>
         )}
-        {!done && (
-          <span
-            className="ml-0.5 inline-block h-[15px] w-[7px] translate-y-[-2px] rounded-[1px] bg-ink-2"
-            style={{ animation: "blink 1s steps(2) infinite" }}
-          />
-        )}
-      </p>
+      </div>
 
       {/* action icons row — 仅在带来源/跟进的真实场景渲染 */}
       {hasExtras && (

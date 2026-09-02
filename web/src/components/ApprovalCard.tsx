@@ -13,6 +13,10 @@
  * 决定落章——卡右上圆形印章(86px/触屏 64px,双环斜盖带过冲),批准=绿
  * 「已批准」、拒绝=红「已拒绝」、超时=红「超时拒绝」,章内署审批信封 seq;
  * 结果胶囊保留(once/always 的区分在胶囊,章上不重复),文案去 ✓/✗ 前缀。
+ * 12 票(2026-09-02):write 类文件写入的预览升级统一 diff(审批门的本职
+ * ——操作员批的就是改动本身):payload 带 diff 行时按 CodeBlock Diff
+ * 视图呈现(行号前端推导,头部统计+复制原始 patch);无 diff 场景保持
+ * 整段内容预览。
  * 07 票接线语义:onDecision 只在操作员点选时触发(经 WS decision 帧回填);
  * 倒计时归零不发包——引擎超时才是权威,本地只收口显示,流上后续事件
  * (拒绝的 tool_result 等)经 settledByTimeout 复核收口。超时与手动拒绝的
@@ -21,8 +25,8 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import CodeBlock from "./CodeBlock";
-import type { DecisionChoice } from "../protocol";
+import CodeBlock, { type DiffRow } from "./CodeBlock";
+import type { DecisionChoice, DiffLine } from "../protocol";
 
 /** 三种审批决定,与 WS 契约的 decision 帧 choice 对齐(权威在 entry/web_ws)。 */
 export type ApprovalChoice = DecisionChoice;
@@ -74,6 +78,30 @@ function ringPhase(left: number, frozen: boolean): "warn" | "hot" | null {
   return null;
 }
 
+/* 统一 diff 行数组 → CodeBlock 的 Diff 行(12 票):行号前端推导——
+ * 删行显旧号,ctx/add 显新号,ctx 双侧计数;段头行不带行号 */
+function toDiffRows(lines: DiffLine[]): DiffRow[] {
+  let oldNum = 0;
+  let curNum = 0;
+  const rows: DiffRow[] = [];
+  for (const line of lines) {
+    const pieces = [{ text: line.text }];
+    if (line.t === "h") {
+      rows.push({ old: null, cur: null, type: "hunk", pieces });
+      continue;
+    }
+    if (line.t === "del") {
+      oldNum += 1;
+      rows.push({ old: oldNum, cur: null, type: "del", pieces });
+      continue;
+    }
+    curNum += 1;
+    if (line.t === "ctx") oldNum += 1;
+    rows.push({ old: null, cur: curNum, type: line.t === "add" ? "add" : "ctx", pieces });
+  }
+  return rows;
+}
+
 function formatClock(total: number) {
   const m = Math.floor(total / 60);
   const s = total % 60;
@@ -84,6 +112,7 @@ export default function ApprovalCard({
   toolName,
   script,
   filename,
+  diff,
   riskClass,
   reason,
   metaLines = [],
@@ -100,6 +129,8 @@ export default function ApprovalCard({
   script: string;
   /** 脚本文件名(CodeBlock 头展示)。 */
   filename?: string;
+  /** write 类文件写入的统一 diff 行(有则按 Diff 视图预览;无则整段内容)。 */
+  diff?: DiffLine[];
   /** 风险级(副作用分级),如 write / execute。 */
   riskClass?: string;
   /** 分级依据(人批的是具体动作,不是类别印象)。 */
@@ -251,14 +282,24 @@ export default function ApprovalCard({
               ))}
             </p>
           )}
-          {/* 待执行脚本全文 */}
+          {/* 待批内容:write 类带 diff 行按改动本身预览,其余整段内容 */}
           <div className="mt-2.5">
-            <CodeBlock
-              variant="Code"
-              lines={script.split("\n")}
-              filename={filename ?? `${toolName}.txt`}
-              labels={{ copy: "复制", copied: "已复制", failed: "复制失败" }}
-            />
+            {diff && diff.length > 0 ? (
+              <CodeBlock
+                variant="Diff"
+                diff={toDiffRows(diff)}
+                filename={filename ?? "diff"}
+                code={diff.map((line) => line.text).join("\n")}
+                labels={{ copy: "复制", copied: "已复制", failed: "复制失败" }}
+              />
+            ) : (
+              <CodeBlock
+                variant="Code"
+                lines={script.split("\n")}
+                filename={filename ?? `${toolName}.txt`}
+                labels={{ copy: "复制", copied: "已复制", failed: "复制失败" }}
+              />
+            )}
           </div>
         </div>
 
