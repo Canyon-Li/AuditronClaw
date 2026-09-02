@@ -46,6 +46,7 @@ from entry.web_owner import (
     AuditTap,
     BackendOwner,
     EventCache,
+    build_write_diff,
     serialize_turn_event,
 )
 
@@ -590,6 +591,85 @@ class TestHeartbeatTurnEndToEnd(BackendOwnerTestBase):
                 return body
             time.sleep(0.05)
         self.fail(f"等心跳回合超时({timeout}s):快照端点始终未见 turn_end")
+
+
+# ============ write 审批复预览:统一 diff 行(payload 可选字段) ============
+
+class TestBuildWriteDiff(unittest.TestCase):
+    """纯函数锚点:行形态(前缀字符保留/段头 h)、无 diff 场景全部回落 None。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.office = self._tmp.name
+        self.addCleanup(self._tmp.cleanup)
+
+    def _write(self, rel, text):
+        path = os.path.join(self.office, *rel.replace("\\", "/").split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def test_new_file_is_all_adds(self):
+        result = build_write_diff(self.office, {
+            "filepath": "reports/weekly.md", "content": "a\nb\nc"})
+        self.assertIsNotNone(result)
+        rows, filename = result
+        self.assertEqual(filename, "reports/weekly.md")
+        self.assertEqual(rows[0]["t"], "h")
+        self.assertTrue(rows[0]["text"].startswith("@@"))
+        kinds = [r["t"] for r in rows[1:]]
+        self.assertEqual(kinds, ["add"] * 3, "无旧文件即全新增")
+        self.assertTrue(all(r["text"].startswith("+") for r in rows[1:]))
+
+    def test_modify_keeps_prefix_chars_and_no_file_header(self):
+        self._write("note.md", "one\ntwo\nthree\nfour\nfive\nsix\n")
+        result = build_write_diff(self.office, {
+            "filepath": "note.md",
+            "content": "one\nTWO\nthree\nfour\nfive\nSIX\n"})
+        rows, _ = result
+        texts = [r["text"] for r in rows]
+        self.assertFalse(any(t.startswith("--- ") or t.startswith("+++ ")
+                             for t in texts), "未具名文件头不入行数组")
+        self.assertIn("-two", texts)
+        self.assertIn("+TWO", texts)
+        self.assertIn(" one", texts, "上下文行保留空格前缀")
+        self.assertIn("-six", texts)
+        self.assertIn("+SIX", texts)
+
+    def test_append_mode_mirrors_tool_landing(self):
+        self._write("log.txt", "line1")
+        rows, _ = build_write_diff(self.office, {
+            "filepath": "log.txt", "content": "line2", "mode": "a"})
+        texts = [r["text"] for r in rows]
+        # 工具落盘会补一枚防粘连换行:追加内容成为独立新行
+        self.assertIn("+line2", texts)
+        self.assertNotIn("-line1", texts, "追加不动旧行")
+
+    def test_identical_content_returns_none(self):
+        self._write("same.txt", "no change")
+        self.assertIsNone(build_write_diff(self.office, {
+            "filepath": "same.txt", "content": "no change"}))
+
+    def test_untrusted_args_fall_back_to_none(self):
+        for args in (
+            {"filepath": "x.txt"},                                # 缺 content
+            {"filepath": "", "content": "x"},                     # 空路径
+            {"filepath": "x.txt", "content": 123},                # content 非串
+            {"filepath": "x.txt", "content": "x", "mode": "x"},   # mode 非法
+            {"filepath": "../escape.txt", "content": "x"},        # 路径越界
+        ):
+            with self.subTest(args=args):
+                self.assertIsNone(build_write_diff(self.office, args),
+                                 "防御分支应返回 None(回落整段预览)")
+
+    def test_extra_arg_keys_do_not_block_diff(self):
+        rows, _ = build_write_diff(
+            self.office, {"filepath": "x.txt", "content": "x", "extra": 1})
+        self.assertTrue(rows, "额外键不影响可信参数的 diff")
+
+    def test_unassembled_office_dir_returns_none(self):
+        self.assertIsNone(build_write_diff("", {
+            "filepath": "x.txt", "content": "x"}))
 
 
 if __name__ == "__main__":

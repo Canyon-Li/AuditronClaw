@@ -12,6 +12,10 @@ export type HistoryOrigin = "history";
 export type ToolCallPayload = { name: string; args: Record<string, unknown> };
 export type ToolResultPayload = { tool: string; result: string };
 export type ReplyPayload = { content: string; final: boolean };
+/** write 审批复预览的统一 diff 行(可选字段):t 分四态,text 含前缀字符
+ * (ctx 空格 / add + / del - / h 为 @@ 段头);无此字段的审批回落整段预览。 */
+export type DiffLine = { t: "ctx" | "add" | "del" | "h"; text: string };
+
 export type ApprovalRequestPayload = {
   tool: string;
   args: Record<string, unknown>;
@@ -20,6 +24,10 @@ export type ApprovalRequestPayload = {
   /** 引擎审批超时的真实值(服务端构造期读 AUDITRONCLAW_APPROVAL_TIMEOUT,
    * 默认 300):倒计时以此为限,客户端不自设期限。 */
   timeout_seconds: number;
+  /** write_office_file 专用:统一 diff 预览行(无变更/参数不可信时缺省)。 */
+  diff?: DiffLine[];
+  /** diff 的归一化相对路径(office 根基准,正斜杠)。 */
+  filename?: string;
 };
 export type TurnEndPayload = {
   tool_calls: { tool: string; args: Record<string, unknown> }[];
