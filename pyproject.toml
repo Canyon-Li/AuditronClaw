@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "auditronclaw"
+version = "1.1.0"
+# 依赖单一来源仍是 requirements.txt(此处声明式引用,不复制清单)
+dynamic = ["dependencies"]
+
+[project.scripts]
+auditronclaw = "entry.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["auditronclaw*", "entry"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
