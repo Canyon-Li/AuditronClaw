@@ -1,13 +1,12 @@
 import os
 from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import SecretStr
-from dotenv import load_dotenv
 '''
 多模型接入(Factory):所有支持项统一走 OpenAI 兼容协议。
 要接入其他协议的提供商,在这里加分支并在 requirements.txt 补对应的
-langchain 集成包。
+langchain 集成包。环境变量(OPENAI_API_KEY / OPENAI_API_BASE)由入口
+加载 .env 注入,本模块只读不加载。
 '''
-load_dotenv()
 
 # 各大厂商官方的 OpenAI 兼容接口地址 (当用户未配置 OPENAI_API_BASE 时作为兜底)
 COMPATIBLE_BASE_URLS = {
