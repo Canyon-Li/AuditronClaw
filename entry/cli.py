@@ -8,7 +8,7 @@ from rich.status import Status
 from dotenv import set_key, load_dotenv, unset_key, dotenv_values
 import sys
 
-from auditronclaw.core.provider import get_provider
+from auditronclaw.core.provider import get_provider, SUPPORTED_PROVIDERS
 from langchain_core.messages import HumanMessage
 
 ENTRY_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -44,7 +44,7 @@ def config_wizard():
     ))
     provider_raw = questionary.select(
         "选择你的模型提供商 (Provider):",
-        choices=["openai", "anthropic", "aliyun (openai compatible)","tencent (openai compatible)", "z.ai (openai compatible)", "other (openai compatible)", "ollama"],
+        choices=["openai", "aliyun (openai compatible)", "dashscope (openai compatible)", "tencent (openai compatible)", "z.ai (openai compatible)", "other (openai compatible)"],
         style=ui_style,
         instruction="(按上下键选择，回车确认)"
     ).ask()
@@ -54,7 +54,6 @@ def config_wizard():
         return
 
     provider = provider_raw.split(" ")[0].strip()
-    is_openai_compatible = "openai" in provider_raw.lower()
 
     model_name = questionary.text(
         "输入指定的模型型号 (如 gpt-4o-mini, qwen-max, glm-4 等):",
@@ -65,39 +64,19 @@ def config_wizard():
         console.print("[dim #8d52ff]✦   录入中断，AuditronClaw 配置已取消。[/dim #8d52ff]")
         return
 
-    api_key = ""
-    env_key = ""
-    if provider != "ollama":
-        if is_openai_compatible:
-            env_key = "OPENAI_API_KEY"
-        elif provider == "anthropic":
-            env_key = "ANTHROPIC_API_KEY"
+    api_key = questionary.password(
+        f"输入你的 OPENAI_API_KEY (对应 {provider_raw}):",
+        style=ui_style
+    ).ask()
 
-        api_key = questionary.password(
-            f"输入你的 {env_key} (对应 {provider_raw}):",
-            style=ui_style
-        ).ask()
+    if api_key is None:
+        console.print("[dim #8d52ff]✦   录入中断，AuditronClaw 配置已取消。[/dim #8d52ff]")
+        return
 
-        if api_key is None:
-            console.print("[dim #8d52ff]✦   录入中断，AuditronClaw 配置已取消。[/dim #8d52ff]")
-            return
-
-    base_url = ""
-    if provider in ["openai", "anthropic"]:
-        base_url = questionary.text(
-            f"输入 {provider} 代理 Base URL (直连请直接回车跳过):",
-            style=ui_style
-        ).ask()
-    elif provider == "ollama":
-        base_url = questionary.text(
-            "输入 Ollama Base URL (默认 http://localhost:11434，直接回车跳过):",
-            style=ui_style
-        ).ask()
-    else:
-        base_url = questionary.text(
-            "输入兼容 Base URL (不填直接回车将使用官方默认地址):",
-            style=ui_style
-        ).ask()
+    base_url = questionary.text(
+        "输入 Base URL (不填直接回车将使用官方默认地址;走代理则填代理地址):",
+        style=ui_style
+    ).ask()
 
     if base_url is None:
         console.print("[dim #8d52ff]✦   录入中断，AuditronClaw 配置已取消。[/dim #8d52ff]")
@@ -107,13 +86,10 @@ def config_wizard():
 
     with Status(f"[bold #8d52ff]正在连接 {provider.upper()} 引擎并发送探测包...[/bold #8d52ff]", spinner="dots", spinner_style="#00ffff"):
         try:
-            if env_key and api_key:
-                os.environ[env_key] = api_key
+            if api_key:
+                os.environ["OPENAI_API_KEY"] = api_key
             if base_url:
-                if is_openai_compatible:
-                    os.environ["OPENAI_API_BASE"] = base_url
-                else:
-                    os.environ[f"{provider.upper()}_BASE_URL"] = base_url
+                os.environ["OPENAI_API_BASE"] = base_url
 
             llm = get_provider(provider_name=provider, model_name=model_name)
             llm.invoke([HumanMessage(content="回复我'收到'。")])  # 连通性探测:能 invoke 即成功
@@ -132,17 +108,12 @@ def config_wizard():
     logging.getLogger("dotenv.main").setLevel(logging.ERROR)
 
     unset_key(ENV_PATH, "OPENAI_API_BASE")
-    unset_key(ENV_PATH, "ANTHROPIC_BASE_URL")
-    unset_key(ENV_PATH, "OLLAMA_BASE_URL")
 
-    if env_key and api_key:
-        set_key(ENV_PATH, env_key, api_key)
-        
+    if api_key:
+        set_key(ENV_PATH, "OPENAI_API_KEY", api_key)
+
     if base_url:
-        if is_openai_compatible:
-            set_key(ENV_PATH, "OPENAI_API_BASE", base_url)
-        else:
-            set_key(ENV_PATH, f"{provider.upper()}_BASE_URL", base_url)
+        set_key(ENV_PATH, "OPENAI_API_BASE", base_url)
     
     set_key(ENV_PATH, "DEFAULT_PROVIDER", provider)
     set_key(ENV_PATH, "DEFAULT_MODEL", model_name)
@@ -171,17 +142,13 @@ def _show_boot_error():
 
 
 def _boot_env_ready() -> bool:
-    """启动自检(load_dotenv 后调用):提供商/型号齐备,按提供商核 API Key。"""
+    """启动自检(load_dotenv 后调用):提供商在册、型号与 API Key 齐备。"""
     provider = os.getenv("DEFAULT_PROVIDER")
     model = os.getenv("DEFAULT_MODEL")
     if not provider or not model:
         return False
-    if provider != "ollama":
-        if provider in ["openai", "aliyun", "z.ai", "tencent", "other"]:
-            return bool(os.getenv("OPENAI_API_KEY"))
-        if provider == "anthropic":
-            return bool(os.getenv("ANTHROPIC_API_KEY"))
-    return True
+    # 名册与 get_provider 同源(SUPPORTED_PROVIDERS),不在册即配置失败
+    return provider.lower() in SUPPORTED_PROVIDERS and bool(os.getenv("OPENAI_API_KEY"))
 
 
 @app.command("run")

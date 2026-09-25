@@ -57,7 +57,7 @@ auditronclaw/core/
   ├─ bus / logger         全行为事件总线 → <thread>.jsonl 审计日志
   ├─ heartbeat            心跳任务引擎（定时任务后台执行）
   ├─ context              上下文裁剪 + 摘要压缩（短期记忆）
-  └─ provider             多模型接入（OpenAI 兼容 / Anthropic / Ollama）
+  └─ provider             多模型接入（OpenAI 兼容协议）
 benchmarks/               注入基准 × 能力基准（共享隔离流水线）
 ```
 
@@ -197,7 +197,7 @@ pip install -e .   # 国内可加 -i https://pypi.tuna.tsinghua.edu.cn/simple
 auditronclaw config
 ```
 
-向导依次引导：选提供商 → 填 API Key → 可选 Base URL（代理/兼容接口）→ 自动测试连接。支持 openai / anthropic / 阿里云 / 腾讯云 / z.ai / 任意 OpenAI 兼容接口，以及 [Ollama](https://ollama.com)（本地部署，无需 Key）。
+向导依次引导：选提供商 → 填 API Key → 可选 Base URL（代理/兼容接口）→ 自动测试连接。支持 openai / 阿里云 / 腾讯云 / z.ai / 任意 OpenAI 兼容接口。
 
 **方式二：手动配置**
 
@@ -257,7 +257,7 @@ python benchmarks/run_golden_eval.py
 ## ❓ 常见问题
 
 - **配置向导没反应 / 无法交互**：直接 `cp .env.example .env` 手动填写，效果等同。
-- **openai / anthropic 直连超时**：在向导中填写代理 Base URL，或改用国内 OpenAI 兼容接口（阿里云 / 腾讯云 / z.ai）。
+- **openai 直连超时**：在向导中填写代理 Base URL，或改用国内 OpenAI 兼容接口（阿里云 / 腾讯云 / z.ai）。
 - **基准跑一次开销多大**：99 条用例逐条真实调用模型，费用取决于所选模型，建议先用低价模型（如 glm-4-flash）跑通流程。
 - **`auditronclaw` 命令不存在 / venv 里没有 pip**：个别环境下建出的 venv 不带 pip，先 `.venv/Scripts/python -m ensurepip --upgrade` 再重跑 `pip install -e .`；或跳过注册，直接 `.venv/Scripts/python -m entry.cli run`，效果等同。
 - **`auditronclaw run` 启动即报 `AUDITRONCLAW_WORKSPACE` 缺失**：工作区根目录必须显式指定，程序不做默认猜测——审计与任务数据落错位置是事故，宁可启动失败。在 `.env` 写一行 `AUDITRONCLAW_WORKSPACE=<仓库绝对路径>/workspace` 即可（配置向导会自动写入，自定义落点不会被覆盖）。
