@@ -155,18 +155,6 @@ def create_profile_tool(thread_id: str, memory_dir: str):
     return save_user_profile
 
 
-def migrate_legacy_profile(thread_id: str, memory_dir: str) -> None:
-    """
-    迁移旧版全局画像:若 memory/user_profile.md 存在且该会话画像不存在,
-    将其移入 memory/profiles/<thread_id>.md。一次性,幂等。
-    """
-    legacy = os.path.join(memory_dir, "user_profile.md")
-    target = _profile_path(thread_id, memory_dir)
-    if os.path.exists(legacy) and not os.path.exists(target):
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        os.replace(legacy, target)
-
-
 @tool
 def get_current_time() -> str:
     """

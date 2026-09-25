@@ -67,20 +67,6 @@ class TestProfileSessionIsolation(unittest.TestCase):
             last_event = diff_events[-1]["content"]
             self.assertIn("职业", last_event)
 
-    def test_default_profile_migrated_from_legacy(self):
-        """旧 user_profile.md 应迁移到 profiles/local_geek_master.md"""
-        # 旧文件在 memory 目录根(user_profile.md),经装配入参指向 self.tmp
-        legacy_file = os.path.join(self.tmp, "user_profile.md")
-        os.makedirs(os.path.dirname(legacy_file), exist_ok=True)
-        with open(legacy_file, "w", encoding="utf-8") as f:
-            f.write("# 旧画像\n- 旧数据")
-
-        builtins_module.migrate_legacy_profile("local_geek_master", self.tmp)
-
-        migrated = os.path.join(self.profiles_dir, "local_geek_master.md")
-        self.assertTrue(os.path.exists(migrated), "旧画像应迁移到 profiles/local_geek_master.md")
-        self.assertFalse(os.path.exists(legacy_file), "迁移后旧文件应删除")
-
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

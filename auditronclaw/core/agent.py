@@ -243,8 +243,7 @@ def create_agent_app(
             active_summary = current_summary
 
         # 读取用户画像(按会话隔离:profiles/<thread_id>.md,落点出自装配工作区)
-        from .tools.builtins import _profile_path, migrate_legacy_profile
-        migrate_legacy_profile(thread_id, workspace.memory_dir)
+        from .tools.builtins import _profile_path
         profile_path = _profile_path(thread_id, workspace.memory_dir)
         profile_content = "暂无记录"
         if os.path.exists(profile_path):
