@@ -81,9 +81,9 @@ class TestApprovalInterfaceTypes(unittest.TestCase):
         self.assertIs(d.source, DecisionSource.USER_ONCE, "source 必须就是审计那个枚举")
 
     def test_turn_origin_enum_values(self):
-        """回合来源四值:human 可问人;heartbeat/bench/unattended 构造上不问人"""
+        """回合来源三值:human 可问人;heartbeat/unattended 构造上不问人"""
         self.assertEqual({o.value for o in TurnOrigin},
-                         {"human", "heartbeat", "bench", "unattended"})
+                         {"human", "heartbeat", "unattended"})
 
     def test_ensure_decision_fail_closed(self):
         """应答值校验:合规原样放行;不合规(垃圾值/伪造 source)一律按无人拒"""

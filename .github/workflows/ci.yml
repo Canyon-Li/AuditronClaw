@@ -61,7 +61,6 @@ jobs:
       - name: 安装依赖
         run: |
           pip install -r requirements.txt
-          pip install pyyaml
 
       - name: 注入基准冒烟(前 3 条 + email 面第 1 条,真实 LLM)
         env:

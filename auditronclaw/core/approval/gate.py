@@ -60,14 +60,13 @@ class TurnOrigin(str, Enum):
     """回合来源(03 票):谁触发了这个回合。
 
     类型化通道传入 run_turn,取代心跳的文本前缀标记——文本可以伪造,枚举
-    不可以。只有 human 可问人;其余(心跳/基准/未声明)构造上永不 interrupt,
+    不可以。只有 human 可问人;其余(心跳/未声明)构造上永不 interrupt,
     规则未命中的高危调用立即拒。缺省 unattended:来源不声明的调用方一律按
     无人值守(fail-closed,基准适配器零改动即落此形态)。
     """
 
     HUMAN = "human"          # 人:可 interrupt 问人
     HEARTBEAT = "heartbeat"  # 心跳:仅规则放行
-    BENCH = "bench"          # 基准:仅规则放行
     UNATTENDED = "unattended"  # 未声明来源:按无人值守
 
 

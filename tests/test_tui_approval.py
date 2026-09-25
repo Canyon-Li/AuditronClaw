@@ -411,13 +411,13 @@ class TestOperatorCommands(unittest.TestCase):
 
     def test_rules_lists_entries_with_source_and_created_at(self):
         store = _store(("write", "office/reports/**", "approval"),
-                       ("execute", "office/scripts/**", "cli"))
+                       ("execute", "office/scripts/**", "bench_fixture"))
         consumed, calls = self._run_command("/rules", store)
         self.assertTrue(consumed)
         self.assertIn("write", _flat(calls))
         self.assertIn("office/reports/**", _flat(calls))
         self.assertIn("approval", _flat(calls))
-        self.assertIn("cli", _flat(calls))
+        self.assertIn("bench_fixture", _flat(calls))
         self.assertIn("execute", _flat(calls))
         self.assertRegex(_flat(calls), r"\d{4}-\d{2}-\d{2}", "创建时间可见")
 

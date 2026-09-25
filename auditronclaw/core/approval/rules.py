@@ -43,7 +43,6 @@ class RuleSource(str, Enum):
     """规则出处:每条豁免可枚举其正当性(审计叙事的主体)。"""
 
     APPROVAL = "approval"            # 审批交互"永久允许"入规则(主轨,03/04 接线)
-    CLI = "cli"                      # 命令行管理面(预留)
     BENCH_FIXTURE = "bench_fixture"  # 基准夹具预置(06 票)
 
 
