@@ -284,7 +284,8 @@ def classify_shell_command(tool_name: str, command: str) -> RiskAssessment:
         return _assess(tool_name, RISK_READ, "空命令,无副作用")
 
     # 展开/替换语法:字符级拒绝的对象同样无法按段定级,不猜
-    if _EXPANSION_PATTERN.search(command) or _percent_var_pattern(command):
+    # (%VAR% 是 cmd 风格变量,成对出现才算——与 _validate_command 同一正则)
+    if _EXPANSION_PATTERN.search(command) or _CMD_VAR_PATTERN.search(command):
         return _assess(tool_name, RISK_UNCLASSIFIED,
                        f"含展开/替换语法,无法按段定级(命令:{command})")
 
@@ -330,11 +331,6 @@ def classify_shell_command(tool_name: str, command: str) -> RiskAssessment:
     triggers = "; ".join(seg for _cls, seg in hazards)
     return _assess(tool_name, risk_class, f"必批命令段:{triggers}",
                    targets=tuple(targets))
-
-
-def _percent_var_pattern(command: str) -> bool:
-    """cmd 风格 %VAR% 展开(成对出现才算变量)——与 _validate_command 同一正则。"""
-    return bool(_CMD_VAR_PATTERN.search(command))
 
 
 def _find_has_hazard_flag(tokens: list) -> bool:

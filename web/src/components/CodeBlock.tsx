@@ -7,7 +7,9 @@
  * 12 票(2026-09-02 第二轮):本体底色 inset→field(比页面深一档,块面
  * 可辨,审批码块与回复码块同享);Diff 视图补 hunk 行(@@ 段头弱化)、
  * 头部统计旁加复制钮(复制原始 patch 文本);diffGutter=false 供回复内
- * diff 围栏——行号与统计从略,只按行分色。 */
+ * diff 围栏——行号与统计从略,只按行分色。
+ * 2026-09-25:撤 i18n labels 层与 onCopy 回调(全仓唯一文案集内联为常量),
+ * 演示默认数据随必传 props 一并退役。 */
 
 "use client";
 
@@ -22,18 +24,6 @@ import { useCallback, useState, type ReactNode } from "react";
  * Both share syntax coloring, insets, and wrapping behavior.
  * ───────────────────────────────────────────────────────── */
 
-const FILE = "churn.ts";
-
-const CODE_LINES = [
-  "export async function churnBatch() {",
-  '  const flavor = await getFlavor("pistachio");',
-  "  const base = await dairy.fetch({ flavor });",
-  '  await freezer.store(base, { temp: "-16C" });',
-  "  if (!base.approved) return null;",
-  "  return base.gallons;",
-  "}",
-];
-
 /* A single run of code within a diff row; `change` tints it as an add/del. */
 export type CodePiece = { text: string; change?: "add" | "del" };
 /* One row of a unified diff: old/new line numbers, its kind, and its pieces.
@@ -44,24 +34,6 @@ export type DiffRow = {
   type: "ctx" | "add" | "del" | "hunk";
   pieces: CodePiece[];
 };
-/* Prominent copy strings on the code block. */
-export type CodeBlockLabels = { copy: string; copied: string; failed: string };
-
-// Back-compat internal aliases for the local component signatures.
-type Piece = CodePiece;
-type Row = DiffRow;
-
-const DIFF: Row[] = [
-  { old: 1, cur: 1, type: "ctx", pieces: [{ text: "export async function churnBatch() {" }] },
-  { old: 2, cur: 2, type: "ctx", pieces: [{ text: '  const flavor = await getFlavor("pistachio");' }] },
-  { old: 3, cur: 3, type: "ctx", pieces: [{ text: "  const base = await dairy.fetch({ flavor });" }] },
-  { old: 4, cur: null, type: "del", pieces: [{ text: "  await freezer.store(base, { temp: " }, { text: '"-14C"', change: "del" }, { text: " });" }] },
-  { old: null, cur: 4, type: "add", pieces: [{ text: "  await freezer.store(base, { temp: " }, { text: '"-16C"', change: "add" }, { text: " });" }] },
-  { old: null, cur: 5, type: "add", pieces: [{ text: "  if (!base.approved) return null;" }] },
-  { old: 5, cur: 6, type: "ctx", pieces: [{ text: "  return base.gallons;" }] },
-  { old: 6, cur: 7, type: "ctx", pieces: [{ text: "}" }] },
-];
-
 const HATCH = "repeating-linear-gradient(45deg, var(--red) 0, var(--red) 1.5px, transparent 1.5px, transparent 3px)";
 
 /* light syntax coloring — keywords/imports/conditionals, functions, strings & numbers */
@@ -88,7 +60,7 @@ function highlight(text: string): ReactNode[] {
   return nodes;
 }
 
-function Pieces({ pieces }: { pieces: Piece[] }) {
+function Pieces({ pieces }: { pieces: CodePiece[] }) {
   return (
     <>
       {pieces.map((p, i) => {
@@ -116,15 +88,12 @@ function Pieces({ pieces }: { pieces: Piece[] }) {
   );
 }
 
-const DEFAULT_LABELS: CodeBlockLabels = {
-  copy: "Copy",
-  copied: "Copied",
-  failed: "Copy failed",
-};
+/* 复制按钮三态文案(全仓唯一文案集) */
+const COPY_TEXT = { copy: "复制", copied: "已复制", failed: "复制失败" };
 
 export type CodeBlockProps = {
   /** Which view to render — "Code" (line-numbered listing) or "Diff". */
-  variant?: string;
+  variant: "Code" | "Diff";
   /** The lines shown in the Code view. */
   lines?: string[];
   /** Raw text placed on the clipboard by Copy. Defaults to `lines` joined. */
@@ -134,33 +103,27 @@ export type CodeBlockProps = {
   /** Diff 视图的行号列与头部统计;false 供回复内 diff 围栏(行号从略)。 */
   diffGutter?: boolean;
   /** Filename shown in the header. */
-  filename?: string;
-  /** Prominent copy strings. */
-  labels?: Partial<CodeBlockLabels>;
-  /** Called with the copied text after a successful copy. */
-  onCopy?: (text: string) => void;
+  filename: string;
 };
 
 export default function CodeBlock({
-  variant = "Code",
-  lines = CODE_LINES,
+  variant,
+  lines,
   code,
-  diff = DIFF,
+  diff,
   diffGutter = true,
-  filename = FILE,
-  labels,
-  onCopy,
+  filename,
 }: CodeBlockProps) {
   const [copyState, setCopyState] = useState<"idle" | "ok" | "no">("idle");
   const isDiff = variant === "Diff";
-  const text = { ...DEFAULT_LABELS, ...labels };
-  const raw = code ?? lines.join("\n");
+  const shown = lines ?? [];
+  const rows = diff ?? [];
+  const raw = code ?? shown.join("\n");
 
   /* 成功/失败都回显 1.6s 后复位;失败不重试(操作员可再点) */
   const copy = useCallback(() => {
     const done = (state: "ok" | "no") => {
       setCopyState(state);
-      if (state === "ok") onCopy?.(raw);
       setTimeout(() => setCopyState("idle"), 1600);
     };
     if (navigator.clipboard?.writeText) {
@@ -171,10 +134,10 @@ export default function CodeBlock({
     } else {
       done("no");
     }
-  }, [raw, onCopy]);
+  }, [raw]);
 
-  const added = diff.filter((r) => r.type === "add").length;
-  const removed = diff.filter((r) => r.type === "del").length;
+  const added = rows.filter((r) => r.type === "add").length;
+  const removed = rows.filter((r) => r.type === "del").length;
 
   return (
     <div className="w-full overflow-hidden rounded-control bg-field shadow-hairline">
@@ -204,7 +167,7 @@ export default function CodeBlock({
             ) : (
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>
             )}
-            {copyState === "ok" ? text.copied : copyState === "no" ? text.failed : text.copy}
+            {copyState === "ok" ? COPY_TEXT.copied : copyState === "no" ? COPY_TEXT.failed : COPY_TEXT.copy}
           </button>
         </span>
       </div>
@@ -216,7 +179,7 @@ export default function CodeBlock({
             {diffGutter && (
               <span className="pointer-events-none absolute inset-y-0 left-5 w-px bg-line" />
             )}
-            {diff.map((r, i) => {
+            {rows.map((r, i) => {
               const add = r.type === "add";
               const del = r.type === "del";
               if (r.type === "hunk") {
@@ -265,7 +228,7 @@ export default function CodeBlock({
           </div>
         ) : (
           <div className="overflow-x-auto py-2.5 pr-3 pl-3">
-            {lines.map((line, i) => (
+            {shown.map((line, i) => (
               <code key={i} className="block whitespace-pre">
                 {line === "" ? "　" : highlight(line)}
               </code>

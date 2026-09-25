@@ -5,6 +5,7 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from langchain_core.tools import StructuredTool
 from functools import lru_cache
+from itertools import islice
 
 from .tools.sandbox_tools import run_office_command
 
@@ -144,14 +145,8 @@ class LazySkillLoader:
         """
         try:
             with open(md_path, "r", encoding="utf-8") as f:
-                # 只读取前 50 行（通常元数据在文件开头）
-                lines = []
-                for i, line in enumerate(f):
-                    if i >= 50:
-                        break
-                    lines.append(line)
-                
-                content = "\n".join(lines)
+                # 只读前 50 行(元数据通常在文件开头)
+                content = "".join(islice(f, 50))
             
             name_match = re.search(r"^name:\s*(.+)$", content, re.MULTILINE)
             desc_match = re.search(r"^description:\s*(.+)$", content, re.MULTILINE)

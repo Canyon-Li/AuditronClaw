@@ -293,12 +293,7 @@ function TurnSection({
       {steps.length > 0 && (
         <ToolChips
           steps={steps}
-          diffs={[]}
-          diffLines={{}}
-          labels={{
-            header: calls > 0 ? `本轮 ${calls} 次工具调用` : "本轮事件",
-            more: "",
-          }}
+          header={calls > 0 ? `本轮 ${calls} 次工具调用` : "本轮事件"}
         />
       )}
       {approvals.map((event) => {
@@ -335,11 +330,6 @@ function TurnSection({
         <StreamingText
           key={event.seq}
           content={tokenizeReply(event.payload.content)}
-          sources={[]}
-          followUps={[]}
-          labels={{ sources: "0 个来源" }}
-          loop={false}
-          fill
         />
       ))}
       {error && (
@@ -558,8 +548,7 @@ export default function TerminalPage({ token }: { token: string }) {
               服务重启前的历史 · {model.historyTurns.length} 个回合
               <span className="h-px flex-1 bg-line" />
             </button>
-            {/* 展开/收起:0fr→1fr 高度过渡(StreamingText 来源列表同法);
-                reduced-motion 由全局兜底直开 */}
+            {/* 展开/收起:0fr→1fr 高度过渡;reduced-motion 由全局兜底直开 */}
             <div
               className="grid transition-[grid-template-rows] duration-300"
               style={{

@@ -196,40 +196,45 @@ class ApprovalBridge:
     """审批应答桥:worker 侧应答器协程 ↔ 输入循环侧应答步。
 
     桥不打印、不碰回合队列——只递送请求与决定(输入仲裁规则见本节开头)。
+    引擎单 worker 逐回合、逐个打断逐个应答:挂起至多一笔,单槽即诚实
+    (web 端 WebApprovalBridge 同一形状)。
     """
 
     def __init__(self):
-        self._entries: List[Tuple[ApprovalRequest, asyncio.Future]] = []
+        self._pending: Optional[Tuple[ApprovalRequest, asyncio.Future]] = None
 
     @property
     def pending(self) -> bool:
         """是否有挂起未决的审批(状态条提示用)。死条目即时出桥,不滞留。"""
-        return any(not fut.done() for _r, fut in self._entries)
+        return self._pending is not None and not self._pending[1].done()
 
     async def responder(self, request: ApprovalRequest) -> ApprovalDecision:
         """引擎应答通道:请求入桥,等输入循环回填决定。
 
         引擎超时掐死本协程时把 future 一并取消;future 一旦终局(回填或
-        取消)条目即时出桥——状态条随下一次重绘就收回"审批等待应答",
+        取消)槽位即时清空——状态条随下一次重绘就收回"审批等待应答",
         不等操作员下次提交(04 票真机发现:死条目滞留会让状态条谎报)。
         """
         fut = asyncio.get_running_loop().create_future()
-        self._entries.append((request, fut))
-        fut.add_done_callback(self._drop_done)
+        self._pending = (request, fut)
+        fut.add_done_callback(self._clear_done)
         try:
             return await fut
         except asyncio.CancelledError:
             fut.cancel()
             raise
 
-    def _drop_done(self, _fut: asyncio.Future) -> None:
+    def _clear_done(self, _fut: asyncio.Future) -> None:
         """终局条目出桥(取消/回填都走到;drain 已取走的条目无妨)。"""
-        self._entries = [(r, f) for r, f in self._entries if not f.done()]
+        if self._pending is not None and self._pending[1].done():
+            self._pending = None
 
     def drain(self) -> List[Tuple[ApprovalRequest, asyncio.Future]]:
-        """取走全部活条目(应答步消费;至多一条——引擎逐个打断逐个应答)。"""
-        entries, self._entries = self._entries, []
-        return [(r, f) for r, f in entries if not f.done()]
+        """取走挂起的审批(应答步消费;至多一条——引擎逐个打断逐个应答)。"""
+        entry, self._pending = self._pending, None
+        if entry is None or entry[1].done():
+            return []
+        return [entry]
 
     @staticmethod
     def resolve(fut: asyncio.Future, decision: ApprovalDecision) -> bool:

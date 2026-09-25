@@ -8,12 +8,10 @@
 import type { ReactNode } from "react";
 import CodeBlock, { type DiffRow } from "./components/CodeBlock";
 
-const CODE_LABELS = { copy: "复制", copied: "已复制", failed: "复制失败" };
-
 /* 围栏首行的语言名(与操作员原型同款字符集);首行即代码时语言为空 */
 const FENCE_LANG = /^([A-Za-z0-9#+._-]*)\n/;
 
-/* 行内 `code` → 等宽 chip(与 SourceChip 同形态:field 底 + hairline) */
+/* 行内 `code` → 等宽 chip(field 底 + hairline) */
 function inlineNodes(text: string): ReactNode[] {
   return text.split(/(`[^`\n]+`)/g).map((part, i) => {
     if (i % 2 === 1) {
@@ -60,14 +58,12 @@ export function renderMarkdownLite(text: string): ReactNode[] {
               diffGutter={false}
               filename="diff"
               code={code}
-              labels={CODE_LABELS}
             />
           ) : (
             <CodeBlock
               variant="Code"
               lines={code.split("\n")}
               filename={lang || "text"}
-              labels={CODE_LABELS}
             />
           )}
         </div>,

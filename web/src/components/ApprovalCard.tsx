@@ -20,7 +20,9 @@
  * 07 票接线语义:onDecision 只在操作员点选时触发(经 WS decision 帧回填);
  * 倒计时归零不发包——引擎超时才是权威,本地只收口显示,流上后续事件
  * (拒绝的 tool_result 等)经 settledByTimeout 复核收口。超时与手动拒绝的
- * 回显同为"✗ 已拒绝",来源区别走审计回执的 source 字段。 */
+ * 回显同为"✗ 已拒绝",来源区别走审计回执的 source 字段。
+ * 2026-09-25:撤 i18n labels 层与 className 形参(唯一调用方均不传,
+ * 六条文案内联为常量)。 */
 
 "use client";
 
@@ -31,29 +33,12 @@ import type { DecisionChoice, DiffLine } from "../protocol";
 /** 三种审批决定,与 WS 契约的 decision 帧 choice 对齐(权威在 entry/web_ws)。 */
 export type ApprovalChoice = DecisionChoice;
 
-export type ApprovalLabels = {
-  allowOnce: string;
-  allowAlways: string;
-  deny: string;
-  approvedOnce: string;
-  approvedAlways: string;
-  denied: string;
-};
-
-const DEFAULT_LABELS: ApprovalLabels = {
-  allowOnce: "允许一次",
-  allowAlways: "永久允许",
-  deny: "拒绝",
-  approvedOnce: "已批准(仅本次)",
-  approvedAlways: "已批准并永久允许",
-  denied: "已拒绝",
-};
-
-/** 已决态按决定一次取齐:回显文案键、胶囊/圆点配色(绿=批准,红=拒绝)、勾叉图标。 */
-const ECHO_KEY: Record<ApprovalChoice, keyof ApprovalLabels> = {
-  once: "approvedOnce",
-  always: "approvedAlways",
-  deny: "denied",
+/** 三选项与已决态回显文案(全仓唯一文案集)。 */
+const BUTTON_TEXT = { once: "允许一次", always: "永久允许", deny: "拒绝" };
+const ECHO_TEXT: Record<ApprovalChoice, string> = {
+  once: "已批准(仅本次)",
+  always: "已批准并永久允许",
+  deny: "已拒绝",
 };
 
 const RESULT_STYLE: Record<ApprovalChoice, { pill: string; dot: string; icon: ReactNode }> = {
@@ -119,9 +104,7 @@ export default function ApprovalCard({
   timeoutSeconds = 300,
   settledByTimeout = false,
   requestSeq,
-  labels,
   onDecision,
-  className,
 }: {
   /** 待批工具调用名,如 "bash"。 */
   toolName: string;
@@ -143,12 +126,9 @@ export default function ApprovalCard({
   settledByTimeout?: boolean;
   /** 审批请求的信封 seq(落章署号用;纯展示,不参与判定)。 */
   requestSeq?: number;
-  labels?: Partial<ApprovalLabels>;
   /** 决定回调:操作员点选时触发一次(倒计时归零不触发,引擎超时是权威)。 */
   onDecision?: (choice: ApprovalChoice) => void;
-  className?: string;
 }) {
-  const t = { ...DEFAULT_LABELS, ...labels };
   const [picked, setPicked] = useState<ApprovalChoice | null>(null);
   const [expired, setExpired] = useState(false); // 本地倒计时归零
   const [left, setLeft] = useState(timeoutSeconds);
@@ -177,7 +157,7 @@ export default function ApprovalCard({
     onDecision?.(next);
   };
 
-  const echo = choice ? t[ECHO_KEY[choice]] : null;
+  const echo = choice ? ECHO_TEXT[choice] : null;
   const result = choice ? RESULT_STYLE[choice] : null;
 
   /* 倒计时环(11 票):弧长随余量耗尽(dashoffset = 已耗占比 ×100),
@@ -192,7 +172,7 @@ export default function ApprovalCard({
   const stampText = stampOk ? "已批准" : byTimeout ? "超时拒绝" : "已拒绝";
 
   return (
-    <div className={`w-full${className ? ` ${className}` : ""}`}>
+    <div className="w-full">
       <div
         className={`relative overflow-hidden rounded-card bg-surface transition-[box-shadow] duration-300 ${
           choice ? "shadow-card" : PENDING_RING
@@ -290,14 +270,12 @@ export default function ApprovalCard({
                 diff={toDiffRows(diff)}
                 filename={filename ?? "diff"}
                 code={diff.map((line) => line.text).join("\n")}
-                labels={{ copy: "复制", copied: "已复制", failed: "复制失败" }}
               />
             ) : (
               <CodeBlock
                 variant="Code"
                 lines={script.split("\n")}
                 filename={filename ?? `${toolName}.txt`}
-                labels={{ copy: "复制", copied: "已复制", failed: "复制失败" }}
               />
             )}
           </div>
@@ -312,21 +290,21 @@ export default function ApprovalCard({
                 onClick={() => decide("deny")}
                 className="flex h-7 items-center rounded-control px-3 text-[12.5px] font-medium text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink max-[600px]:h-11 max-[600px]:min-w-0 max-[600px]:flex-1"
               >
-                {t.deny}
+                {BUTTON_TEXT.deny}
               </button>
               <button
                 type="button"
                 onClick={() => decide("once")}
                 className="flex h-7 items-center rounded-control bg-surface px-3 text-[12.5px] font-medium text-ink shadow-btn transition-colors duration-100 hover:bg-hover max-[600px]:h-11 max-[600px]:min-w-0 max-[600px]:flex-1"
               >
-                {t.allowOnce}
+                {BUTTON_TEXT.once}
               </button>
               <button
                 type="button"
                 onClick={() => decide("always")}
                 className="flex h-7 items-center rounded-control bg-green-tint px-3 text-[12.5px] font-medium text-green transition-opacity duration-100 hover:opacity-90 max-[600px]:h-11 max-[600px]:min-w-0 max-[600px]:flex-1"
               >
-                {t.allowAlways}
+                {BUTTON_TEXT.always}
               </button>
             </>
           ) : (
