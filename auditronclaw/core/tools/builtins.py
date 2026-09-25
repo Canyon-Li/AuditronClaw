@@ -3,7 +3,7 @@ from typing import Callable, Literal, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
-from .base import auditronclaw_tool
+from langchain_core.tools import tool
 from .desk_tool import create_desk_submit_tool
 import ast
 import operator
@@ -67,7 +67,7 @@ def _safe_eval_expression(expression: str) -> float:
     return _eval_node(tree)
 
 
-@auditronclaw_tool
+@tool
 def get_system_model_info() -> str:
     """
     获取当前 AuditronClaw 正在运行的底层大模型（LLM）型号和提供商信息。
@@ -120,7 +120,7 @@ def create_profile_tool(thread_id: str, memory_dir: str):
     """
     profile_path = _profile_path(thread_id, memory_dir)
 
-    @auditronclaw_tool
+    @tool
     def save_user_profile(new_content: str) -> str:
         """
         更新当前会话的用户显性记忆档案。
@@ -167,7 +167,7 @@ def migrate_legacy_profile(thread_id: str, memory_dir: str) -> None:
         os.replace(legacy, target)
 
 
-@auditronclaw_tool
+@tool
 def get_current_time() -> str:
     """
     获取当前的系统时间和日期。
@@ -177,7 +177,7 @@ def get_current_time() -> str:
     return f"当前本地系统时间是: {now.strftime('%Y-%m-%d %H:%M:%S')}"
 
 
-@auditronclaw_tool
+@tool
 def calculator(expression: str) -> str:
     """
     一个简单的数学计算器。
@@ -330,7 +330,7 @@ def create_task_tools(tasks_file: str) -> list:
     队列路径不进模块级常量（05 票）：入口按工作区装配一次，测试与基准
     各装配各的临时队列文件，互不串台。
     """
-    @auditronclaw_tool
+    @tool
     # 注解保持隐式 Optional:签名即 LLM 看到的工具 schema,显式 | None 会把
     # "type":"string" 变 anyOf[string,null],schema 钉住现状,由 mypy ignore 埋点
     def schedule_task(target_time: str, description: str, repeat: str = None,  # type: ignore[assignment]
@@ -385,7 +385,7 @@ def create_task_tools(tasks_file: str) -> list:
             msg += f" | 循环模式：{repeat} (共 {repeat_count if repeat_count else '无限'} 次)"
         return msg
 
-    @auditronclaw_tool
+    @tool
     def list_scheduled_tasks() -> str:
         """
         查看当前所有待处理的定时任务列表。
@@ -417,7 +417,7 @@ def create_task_tools(tasks_file: str) -> list:
                 res += f"- [ID: {t.id}] 时间: {t.target_time} | 任务: {t.description}\n"
             return res
 
-    @auditronclaw_tool
+    @tool
     def delete_scheduled_task(task_id: str) -> str:
         """
         根据 ID 取消或删除一个定时任务。
@@ -459,7 +459,7 @@ def create_task_tools(tasks_file: str) -> list:
 
             return f" 任务 [ID: {task_id}] 已成功取消。"
 
-    @auditronclaw_tool
+    @tool
     # 同 schedule_task:schema 钉住现状(隐式 Optional),mypy 埋点
     def modify_scheduled_task(task_id: str, new_time: str = None,  # type: ignore[assignment]
                               new_description: str = None) -> str:  # type: ignore[assignment]

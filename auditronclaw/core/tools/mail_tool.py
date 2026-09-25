@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Any, Callable, Optional
 
-from .base import auditronclaw_tool
+from langchain_core.tools import tool
 from .domain_gate import require_domain, DEFAULT_ALLOWED_DOMAINS
 from .egress import EgressChannel, register_egress_channel
 from ..approval.hooks import Receipt
@@ -198,7 +198,7 @@ _EXTERNAL_DATA_FRAME = (
 )
 
 
-@auditronclaw_tool
+@tool
 def read_recent_emails(hours: int = 24, max_emails: int = 10) -> str:
     """
     只读拉取近期邮箱邮件（发件人/主题/正文摘要），供分类、总结与提取待办使用。

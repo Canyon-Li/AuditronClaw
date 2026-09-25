@@ -6,7 +6,7 @@ from urllib.error import URLError
 
 from ...core.approval.hooks import Receipt
 from ...core.domain import DomainRegistration
-from ...core.tools.base import auditronclaw_tool
+from langchain_core.tools import tool
 from ...core.tools.domain_gate import (
     DEFAULT_ALLOWED_DOMAINS,
     require_domain,
@@ -90,7 +90,7 @@ _EGRESS_FEISHU_WEBHOOK = EgressChannel(
 register_egress_channel(_EGRESS_FEISHU_WEBHOOK)
 
 
-@auditronclaw_tool
+@tool
 def send_feishu_summary(summary_text: str) -> str:
     """
     把一段文本摘要推送到作者指定的飞书群（自定义机器人）。

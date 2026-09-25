@@ -3,7 +3,7 @@ from typing import Callable, List, Optional
 
 from pydantic import BaseModel, Field
 
-from .base import auditronclaw_tool
+from langchain_core.tools import tool
 from .domain_gate import (
     DomainDenied,
     domain_denied_audit_content,
@@ -113,7 +113,7 @@ def create_desk_submit_tool(tasks_file: str, push_text: Optional[Callable] = Non
     None 仅供不接线推送的桩装配（形状探针），真实装配必传——缺失时提交
     即返回结构化错误，fail-loud 不静默跳过推送步。
     """
-    @auditronclaw_tool(args_schema=DeskReport)
+    @tool(args_schema=DeskReport)
     def submit_mailbox_desk_report(
         window_hours: int,
         total_mails: int,

@@ -24,10 +24,10 @@ MCP 不做一等公民：不引入 MCP SDK，不将自身工具暴露为 MCP ser
 
 **定位声明（集成者注入点，非防线缺口）**：`tools` / `extra_tools` 是库 API，调用方与本代码同处一个信任域——能注入工具就能直接改 `builtins.py`，进程内本就不存在可强制执行的安全边界。因此此处不做、也不宣称拦截；命令白名单与路径防护的声明范围自始就是内置工具面。外接工具的调用仍全程落审计（埋点在图节点层，与工具来源无关），出问题可归因到注入方。两个参数中，`tools` 整体替换（继承自上游基线），`extra_tools` 追加注入、保住内置工具面——后者是本项目为收敛扩展姿势而设，不是扩大攻击面的新洞。
 
-**后续注入点**：路线图后续的统一策略门做在**行为层**——约束每次工具调用实际做了什么，与工具来源无关：内置工具被攻破同样过门，外接工具自动纳入，无需单独条目。`AuditronClawBaseTool` 预留的权限/超时字段是该机制的挂点。安装级信任转移（OpenClaw `installPolicy` 形态）仅在出现**运行时安装流**——把他人代码装进运行中的进程，如 Web 终端在线装扩展、或届时经网关接入 MCP——时才有必要，与库 API 注入不同层。
+**后续注入点**：路线图后续的统一策略门做在**行为层**——约束每次工具调用实际做了什么，与工具来源无关：内置工具被攻破同样过门，外接工具自动纳入，无需单独条目。该机制的挂点是装配期包装（`wrap_tool`）。安装级信任转移（OpenClaw `installPolicy` 形态）仅在出现**运行时安装流**——把他人代码装进运行中的进程，如 Web 终端在线装扩展、或届时经网关接入 MCP——时才有必要，与库 API 注入不同层。
 
 ## 关联代码
 
 - `auditronclaw/core/agent.py` —— 工具装配点 `create_agent_app`
-- `auditronclaw/core/tools/base.py` —— `AuditronClawBaseTool` 预留位
+- `auditronclaw/core/tools/base.py` —— `AuditronClawBaseTool` 预留位（2026-09-25 删除）
 - `auditronclaw/core/skill_loader.py` —— SKILL.md 零代码扩展点

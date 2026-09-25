@@ -1,6 +1,6 @@
 import os
 import subprocess
-from .base import auditronclaw_tool
+from langchain_core.tools import tool
 from ..logger import get_audit_logger
 import re
 import shlex
@@ -380,7 +380,7 @@ def build_office_tools(office_dir: str) -> list:
     路径不进模块级常量（05 票）：入口按工作区装配一次，工具经闭包持有
     落点——测试与基准各装配各的临时工位，互不串台。
     """
-    @auditronclaw_tool
+    @tool
     def list_office_files(sub_dir: str = "") -> str:
         """
         查看你的 office 工位里有哪些文件和文件夹。
@@ -406,7 +406,7 @@ def build_office_tools(office_dir: str) -> list:
         except Exception as e:
             return str(e)
 
-    @auditronclaw_tool
+    @tool
     def read_office_file(filepath: str) -> str:
         """
         读取 office 工位里指定文件的内容。
@@ -426,7 +426,7 @@ def build_office_tools(office_dir: str) -> list:
         except Exception as e:
             return str(e)
 
-    @auditronclaw_tool
+    @tool
     def write_office_file(filepath: str, content: str, mode: str = "w") -> str:
         """
         在 office 工位里操作文件内容。
@@ -467,7 +467,7 @@ def build_office_tools(office_dir: str) -> list:
         except Exception as e:
             return str(e)
 
-    @auditronclaw_tool
+    @tool
     def execute_office_shell(command: str) -> str:
         """
         在 office 工位中执行 Shell 命令（结构化命令白名单管控）。
