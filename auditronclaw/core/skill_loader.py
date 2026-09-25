@@ -1,6 +1,5 @@
 import os
 import re
-import time
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from langchain_core.tools import StructuredTool
@@ -35,30 +34,22 @@ class DynamicSkillInput(BaseModel):
 
 class LazySkillLoader:
     """
-    渐进式技能加载器 + 缓存机制
-    
-    特性：
-    1. 启动时只扫描元数据（name, description），不加载完整内容
-    2. 首次调用技能时才加载完整内容并缓存
-    3. 支持热更新（修改技能文件后自动重新加载）
-    4. LRU缓存策略，自动清理不常用的技能
+    懒加载技能加载器
+
+    装配期扫描目录只取元数据（name, description）生成占位工具；完整内容
+    在首次 mode='help' 调用时才读取，按文件 mtime 缓存（文件改了自动重读）。
     """
-    
-    def __init__(self, skills_dir: str, office_dir: str, cache_size: int = 50):
+
+    def __init__(self, skills_dir: str, office_dir: str):
         """
         Args:
             skills_dir: 技能目录（office/skills），装配期入参
             office_dir: office 工位根，mode=run 的命令在此执行（与
                 execute_office_shell 同一执行体、同一道边界）
-            cache_size: 内容缓存量
         """
         self._skills_dir = skills_dir
         self._office_dir = office_dir
-        self._skill_registry: Optional[List[Dict[str, Any]]] = None
-        self._cache_size = cache_size
-        self._last_scan_time = 0.0
-        self._scan_interval = 60  # 缓存元数据扫描结果60秒
-    
+
     @lru_cache(maxsize=50)
     def _load_skill_content(self, md_path: str, mtime: float) -> str:
         """
@@ -74,29 +65,16 @@ class LazySkillLoader:
         with open(md_path, "r", encoding="utf-8") as f:
             return f.read()
     
-    def _scan_skills(self, force_rescan: bool = False) -> List[Dict[str, Any]]:
+    def _scan_skills(self) -> List[Dict[str, Any]]:
         """
         扫描技能目录，只提取元数据（轻量级操作）
-        
-        Args:
-            force_rescan: 是否强制重新扫描（忽略缓存）
-        
+
         Returns:
             技能元数据列表
         """
-        current_time = time.time()
-        
-        # 缓存检查：如果最近扫描过且不强制刷新，直接返回缓存
-        if (not force_rescan and 
-            self._skill_registry is not None and 
-            current_time - self._last_scan_time < self._scan_interval):
-            return self._skill_registry
-        
         skills = []
-        
+
         if not os.path.exists(self._skills_dir):
-            self._skill_registry = []
-            self._last_scan_time = current_time
             return []
 
         for item in os.listdir(self._skills_dir):
@@ -124,9 +102,6 @@ class LazySkillLoader:
                     })
             except Exception as e:
                 print(f" [警告] 扫描技能 {item} 失败: {e}")
-        
-        self._skill_registry = skills
-        self._last_scan_time = current_time
         
         if skills:
             print(f" [OK] 扫描到 {len(skills)} 个技能（懒加载模式）")
@@ -218,37 +193,23 @@ class LazySkillLoader:
             metadata={SKILL_FOLDER_META_KEY: skill_info["folder"]},
         )
     
-    def get_all_tools(self, force_rescan: bool = False) -> List[StructuredTool]:
+    def get_all_tools(self) -> List[StructuredTool]:
         """
         获取所有工具（懒加载占位符）
-        
-        Args:
-            force_rescan: 是否强制重新扫描技能目录
-        
+
         Returns:
             工具对象列表
         """
-        skill_infos = self._scan_skills(force_rescan=force_rescan)
+        skill_infos = self._scan_skills()
         
         tools = []
         for skill_info in skill_infos:
             tools.append(self._create_lazy_tool(skill_info))
         
         return tools
-    
-    def get_tool_count(self) -> int:
-        """获取技能数量（不触发加载）"""
-        return len(self._scan_skills())
-    
-    def clear_cache(self):
-        """清除所有缓存"""
-        self._load_skill_content.cache_clear()
-        self._skill_registry = None
-        print(" [OK] 技能缓存已清除")
 
 
-def load_dynamic_skills(skills_dir: str, office_dir: str,
-                        force_rescan: bool = False) -> List[StructuredTool]:
+def load_dynamic_skills(skills_dir: str, office_dir: str) -> List[StructuredTool]:
     """
     装配动态技能（懒加载工具占位符）：目录为装配期入参（05 票）。
 
@@ -259,10 +220,8 @@ def load_dynamic_skills(skills_dir: str, office_dir: str,
     Args:
         skills_dir: 技能目录（office/skills）
         office_dir: office 工位根（mode=run 的执行目录）
-        force_rescan: 是否强制重新扫描技能目录（默认 False）
 
     Returns:
         工具对象列表（懒加载占位符）
     """
-    return LazySkillLoader(skills_dir, office_dir).get_all_tools(
-        force_rescan=force_rescan)
+    return LazySkillLoader(skills_dir, office_dir).get_all_tools()
